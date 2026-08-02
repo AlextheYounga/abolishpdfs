@@ -138,6 +138,17 @@ mapping. Font-dependent content must therefore remain a background fallback
 until the compatibility corpus proves a safe mapping or justifies a narrowly
 scoped PDFium extension.
 
+Milestone 2 adds the owned diagnostic converter. It can be exercised with:
+
+```text
+abolishpdfs --pdfium-path /path/to/libpdfium.so --diagnostic document.pdf
+```
+
+This output is a serialized `DocumentModel`. It contains no PDFium handles and
+records conservative background fallback decisions instead of silently treating
+uncertain text as reconstructable. It is an inspection artifact, not the final
+HTML output contract.
+
 ## Links
 - [pdf2htmlex](https://github.com/pdf2htmlex/pdf2htmlex)
 - [fontforge](https://github.com/fontforge/fontforge)

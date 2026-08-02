@@ -19,4 +19,8 @@ pub struct Cli {
     /// Inspect PDFium's text and page-object capabilities without writing HTML.
     #[arg(long)]
     pub probe: bool,
+
+    /// Extract an owned document model and print it as diagnostic JSON.
+    #[arg(long)]
+    pub diagnostic: bool,
 }

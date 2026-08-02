@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use abolishpdfs::{
     cli::Cli,
-    pdfium::{CapabilityProbe, PdfiumLibrary},
+    pdfium::{CapabilityProbe, DocumentExtractor, PdfiumLibrary},
 };
 use clap::Parser;
 
@@ -30,6 +30,23 @@ fn main() -> ExitCode {
                     },
                     Err(error) => {
                         eprintln!("PDFium capability probe failed: {error}");
+                        ExitCode::FAILURE
+                    }
+                }
+            } else if cli.diagnostic {
+                match DocumentExtractor::extract(&cli.input, &library) {
+                    Ok(model) => match serde_json::to_string_pretty(&model) {
+                        Ok(json) => {
+                            println!("{json}");
+                            ExitCode::SUCCESS
+                        }
+                        Err(error) => {
+                            eprintln!("Could not serialize document model: {error}");
+                            ExitCode::FAILURE
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("Document extraction failed: {error}");
                         ExitCode::FAILURE
                     }
                 }
