@@ -160,6 +160,14 @@ The writer produces `index.html`, `document.css`, and split page files under
 that the model marks for background fallback is intentionally not duplicated in
 the native layer until selective raster backgrounds are implemented.
 
+Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
+ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.
+Their expected feature classifications are stored in `tests/fixtures/manifest.json` and
+validated by `cargo test --test corpus_manifest`. Diagnostic classification is
+available through `tools/corpus.py`; optional Playwright screenshot and copied
+text checks are provided by `tools/browser_corpus.py`. Licensed upstream PDFs
+remain pending until provenance and redistribution terms are recorded.
+
 ## Links
 - [pdf2htmlex](https://github.com/pdf2htmlex/pdf2htmlex)
 - [fontforge](https://github.com/fontforge/fontforge)

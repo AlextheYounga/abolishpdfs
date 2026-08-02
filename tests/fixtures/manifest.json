@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "basic-horizontal",
+      "path": "generated/basic-horizontal.pdf",
+      "source": "generated",
+      "classifications": ["horizontal-text", "system-font", "selectable-text"],
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0},
+      "clipboard": {"expected_text": "Hello, PDFium!", "status": "pending"},
+      "screenshot": {"status": "pending"}
+    },
+    {
+      "id": "transforms",
+      "path": "generated/transforms.pdf",
+      "source": "generated",
+      "classifications": ["horizontal-text", "rotation", "scale", "transforms"],
+      "expected": {"pages": 1, "text_objects_min": 2, "links": 0},
+      "clipboard": {"expected_text": "Normal Rotated", "status": "pending"},
+      "screenshot": {"status": "pending"}
+    },
+    {
+      "id": "spacing",
+      "path": "generated/spacing.pdf",
+      "source": "generated",
+      "classifications": ["horizontal-text", "explicit-spacing", "selectable-text"],
+      "expected": {"pages": 1, "text_objects_min": 3, "links": 0},
+      "clipboard": {"expected_text": "A  B C", "status": "pending"},
+      "screenshot": {"status": "pending"}
+    },
+    {
+      "id": "page-boxes",
+      "path": "generated/page-boxes.pdf",
+      "source": "generated",
+      "classifications": ["page-size", "crop-box"],
+      "expected": {"pages": 2, "text_objects_min": 2, "links": 0},
+      "clipboard": {"expected_text": "Crop box page", "status": "pending"},
+      "screenshot": {"status": "pending"}
+    },
+    {
+      "id": "links",
+      "path": "generated/links.pdf",
+      "source": "generated",
+      "classifications": ["uri-link", "link-rectangle", "selectable-text"],
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 1},
+      "clipboard": {"expected_text": "Open example", "status": "pending"},
+      "screenshot": {"status": "pending"}
+    },
+    {
+      "id": "clipping-transparency",
+      "path": "generated/clipping-transparency.pdf",
+      "source": "generated",
+      "classifications": ["clipping", "transparency", "background-graphics"],
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0},
+      "clipboard": {"expected_text": "Clipped text", "status": "pending"},
+      "screenshot": {"status": "pending"}
+    }
+  ],
+  "external_corpus": [
+    {
+      "id": "pdf2htmlEx-tests",
+      "path": "external/pdf2htmlEx-tests",
+      "source": "upstream-license-review",
+      "status": "pending",
+      "note": "Import only after confirming the upstream fixture license and recording provenance."
+    }
+  ]
+}
