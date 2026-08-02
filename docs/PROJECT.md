@@ -118,6 +118,26 @@ Stable Rust document model
 HTML document and assets
 ```
 
+## PDFium Capability Probe
+
+Milestone 1 is exercised with the `--probe` CLI mode before building production
+extraction or output code:
+
+```text
+abolishpdfs --pdfium-path /path/to/libpdfium.so --probe document.pdf
+```
+
+The JSON report records page and recursive Form XObject paint order, character
+geometry and text-object association, decoded font-data availability, and a
+deactivate/render/reactivate bitmap check for text objects. A target-platform
+Milestone 1 run passes only when the report shows that suppressing active text
+changes the bitmap, reactivation restores the original bitmap, and no operation
+errors are reported. It also states the current public-API limitation: the
+configured PDFium bindings do not expose a per-character PDF-code or glyph-ID
+mapping. Font-dependent content must therefore remain a background fallback
+until the compatibility corpus proves a safe mapping or justifies a narrowly
+scoped PDFium extension.
+
 ## Links
 - [pdf2htmlex](https://github.com/pdf2htmlex/pdf2htmlex)
 - [fontforge](https://github.com/fontforge/fontforge)
