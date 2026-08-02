@@ -2,6 +2,7 @@ use std::process::ExitCode;
 
 use abolishpdfs::{
     cli::Cli,
+    output::HtmlWriter,
     pdfium::{CapabilityProbe, DocumentExtractor, PdfiumLibrary},
 };
 use clap::Parser;
@@ -51,9 +52,22 @@ fn main() -> ExitCode {
                     }
                 }
             } else {
-                println!("PDFium library: {}", library.path().display());
-                println!("input: {}", cli.input.display());
-                ExitCode::SUCCESS
+                match DocumentExtractor::extract(&cli.input, &library) {
+                    Ok(model) => match HtmlWriter::write_to(&model, &cli.output) {
+                        Ok(()) => {
+                            println!("Wrote HTML output to {}", cli.output.display());
+                            ExitCode::SUCCESS
+                        }
+                        Err(error) => {
+                            eprintln!("HTML output failed: {error}");
+                            ExitCode::FAILURE
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("Document extraction failed: {error}");
+                        ExitCode::FAILURE
+                    }
+                }
             }
         }
         Err(error) => {

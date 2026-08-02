@@ -23,4 +23,8 @@ pub struct Cli {
     /// Extract an owned document model and print it as diagnostic JSON.
     #[arg(long)]
     pub diagnostic: bool,
+
+    /// Directory receiving split-page HTML output.
+    #[arg(long, default_value = "output", value_name = "DIR")]
+    pub output: PathBuf,
 }

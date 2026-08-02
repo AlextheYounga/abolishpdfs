@@ -101,13 +101,20 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
                     .first()
                     .and_then(|glyph| glyph.font)
                     .unwrap_or(font);
-                let reconstruction = reconstruction_decision(&object_glyphs, font, model);
+                let render_mode = text_render_mode(text.render_mode());
+                let object_transform = text.matrix().ok().map(affine_transform);
+                let mut object_glyphs = object_glyphs;
+                for glyph in &mut object_glyphs {
+                    glyph.transform = object_transform;
+                }
+                let reconstruction =
+                    reconstruction_decision(&object_glyphs, font, render_mode, model);
                 text_objects.push(TextObject {
                     source: paint_order,
                     paint_order,
                     glyphs: object_glyphs,
                     font,
-                    render_mode: text_render_mode(text.render_mode()),
+                    render_mode,
                     reconstruction,
                 });
             }
@@ -179,10 +186,20 @@ fn extract_glyph(
 fn reconstruction_decision(
     glyphs: &[Glyph],
     font: FontId,
+    render_mode: TextRenderMode,
     model: &DocumentModel,
 ) -> ReconstructionDecision {
+    if glyphs.is_empty() {
+        return ReconstructionDecision::Background(FallbackReason::ExtractionError);
+    }
     if glyphs.iter().any(|glyph| glyph.unicode.is_none()) {
         return ReconstructionDecision::Background(FallbackReason::MissingUnicode);
+    }
+    if matches!(
+        render_mode,
+        TextRenderMode::Invisible | TextRenderMode::Unknown
+    ) {
+        return ReconstructionDecision::Background(FallbackReason::UnsupportedRenderMode);
     }
     if glyphs
         .iter()
@@ -190,11 +207,11 @@ fn reconstruction_decision(
     {
         return ReconstructionDecision::Background(FallbackReason::MissingGeometry);
     }
-    if !model
+    if model
         .fonts
         .fonts
         .get(&font)
-        .is_some_and(|font| font.mapping_proven)
+        .is_some_and(|font| font.embedded.unwrap_or(true) && !font.mapping_proven)
     {
         return ReconstructionDecision::Background(FallbackReason::UnprovenFontMapping);
     }
@@ -254,6 +271,17 @@ fn rect(value: PdfRect) -> Rect {
         bottom: value.bottom().value,
         right: value.right().value,
         top: value.top().value,
+    }
+}
+
+fn affine_transform(value: PdfMatrix) -> crate::model::AffineTransform {
+    crate::model::AffineTransform {
+        a: value.a(),
+        b: value.b(),
+        c: value.c(),
+        d: value.d(),
+        e: value.e(),
+        f: value.f(),
     }
 }
 

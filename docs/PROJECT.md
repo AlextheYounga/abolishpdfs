@@ -149,6 +149,17 @@ records conservative background fallback decisions instead of silently treating
 uncertain text as reconstructable. It is an inspection artifact, not the final
 HTML output contract.
 
+Milestone 3 writes the first HTML artifact set from that model:
+
+```text
+abolishpdfs --pdfium-path /path/to/libpdfium.so --output output document.pdf
+```
+
+The writer produces `index.html`, `document.css`, and split page files under
+`pages/`. Native text is positioned in PDF-point-sized page containers; text
+that the model marks for background fallback is intentionally not duplicated in
+the native layer until selective raster backgrounds are implemented.
+
 ## Links
 - [pdf2htmlex](https://github.com/pdf2htmlex/pdf2htmlex)
 - [fontforge](https://github.com/fontforge/fontforge)
