@@ -21,6 +21,8 @@ The project is not merely a PDF viewer with a transparent text layer. Its primar
 
 Rendered backgrounds and invisible text overlays remain available as correctness fallbacks for cases that cannot yet be reconstructed safely.
 
+You can find the `pdf2htmlEx` core code here: docs/agents/links/pdf2htmlEx-src (symlink) 
+
 ## Success standard
 
 The project should aim to match or exceed `pdf2htmlEX` across a representative compatibility corpus.
@@ -120,3 +122,4 @@ HTML document and assets
 - [pdf2htmlex](https://github.com/pdf2htmlex/pdf2htmlex)
 - [fontforge](https://github.com/fontforge/fontforge)
 - [pdfium](https://github.com/ajrcarey/pdfium-render)
+- [pdf2html source code](docs/agents/links/pdf2htmlEx-src) (symlink)
