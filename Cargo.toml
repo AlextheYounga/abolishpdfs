@@ -16,8 +16,6 @@ serde_json = "1.0.151"
 tempfile = "3.27.0"
 thiserror = "2.0.19"
 
-[lints]
-
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }
