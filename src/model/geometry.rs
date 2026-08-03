@@ -39,10 +39,5 @@ pub struct Color {
 }
 
 impl Color {
-    pub const BLACK: Self = Self {
-        red: 0,
-        green: 0,
-        blue: 0,
-        alpha: 255,
-    };
+    pub const BLACK: Self = Self { red: 0, green: 0, blue: 0, alpha: 255 };
 }

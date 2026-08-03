@@ -3,11 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "abolishpdfs",
-    version,
-    about = "Convert PDF documents to high-fidelity HTML"
-)]
+#[command(name = "abolishpdfs", version, about = "Convert PDF documents to high-fidelity HTML")]
 pub struct Cli {
     /// PDF document to convert.
     pub input: PathBuf,

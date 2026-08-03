@@ -1,6 +1,6 @@
-use std::{fmt::Write, fs, path::Path};
+use std::{fs, io, path::Path};
 
-use crate::model::{Color, DocumentModel, Glyph, PageModel, TextObject, TextRenderMode};
+use crate::model::{Color, DocumentModel, Glyph, PageModel, ReconstructionDecision, TextObject, TextRenderMode};
 
 const DOCUMENT_CSS: &str = r#":root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -23,27 +23,18 @@ pub struct HtmlDocument {
 
 impl HtmlWriter {
     pub fn render(model: &DocumentModel) -> HtmlDocument {
-        let pages = model
-            .pages
-            .iter()
-            .map(|page| (format!("{}.html", page.number), render_page(page)))
-            .collect::<Vec<_>>();
+        let pages =
+            model.pages.iter().map(|page| (format!("{}.html", page.number), render_page(page))).collect::<Vec<_>>();
         let index_html = render_index(&model.pages);
-        HtmlDocument {
-            index_html,
-            document_css: DOCUMENT_CSS.to_owned(),
-            pages,
-        }
+        HtmlDocument { index_html, document_css: DOCUMENT_CSS.to_owned(), pages }
     }
 
     pub fn write_to(model: &DocumentModel, output: &Path) -> Result<(), OutputError> {
         let rendered = Self::render(model);
         fs::create_dir_all(output.join("pages")).map_err(OutputError::CreateDirectory)?;
         fs::create_dir_all(output.join("assets")).map_err(OutputError::CreateDirectory)?;
-        fs::write(output.join("index.html"), rendered.index_html)
-            .map_err(OutputError::WriteFile)?;
-        fs::write(output.join("document.css"), rendered.document_css)
-            .map_err(OutputError::WriteFile)?;
+        fs::write(output.join("index.html"), rendered.index_html).map_err(OutputError::WriteFile)?;
+        fs::write(output.join("document.css"), rendered.document_css).map_err(OutputError::WriteFile)?;
         for (name, page) in rendered.pages {
             fs::write(output.join("pages").join(name), page).map_err(OutputError::WriteFile)?;
         }
@@ -58,33 +49,28 @@ fn render_index(pages: &[PageModel]) -> String {
     for page in pages {
         let page_width = page.crop_box.right - page.crop_box.left;
         let page_height = page.crop_box.top - page.crop_box.bottom;
-        write!(
-            html,
+        html.push_str(&format!(
             "<iframe class=\"page-frame\" title=\"Page {}\" src=\"pages/{}.html\" style=\"width:{}px;height:{}px\"></iframe>",
             page.number,
             page.number,
             css_number(page_width),
             css_number(page_height)
-        )
-        .unwrap();
+        ));
     }
     html.push_str("</main></body></html>");
     html
 }
 
 fn render_page(page: &PageModel) -> String {
-    let mut html = String::new();
     let page_width = page.crop_box.right - page.crop_box.left;
     let page_height = page.crop_box.top - page.crop_box.bottom;
-    write!(
-        html,
+    let mut html = format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Page {}</title><link rel=\"stylesheet\" href=\"../document.css\"></head><body><main class=\"document\"><section class=\"page\" aria-label=\"Page {}\" style=\"width:{}px;height:{}px\">",
         page.number,
         page.number,
         css_number(page_width),
         css_number(page_height)
-    )
-    .unwrap();
+    );
     for text_object in &page.text_objects {
         render_text_object(&mut html, page, text_object);
     }
@@ -93,10 +79,7 @@ fn render_page(page: &PageModel) -> String {
 }
 
 fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObject) {
-    if !matches!(
-        text_object.reconstruction,
-        crate::model::ReconstructionDecision::NativeText
-    ) {
+    if !matches!(text_object.reconstruction, ReconstructionDecision::NativeText) {
         return;
     }
     for glyph in &text_object.glyphs {
@@ -105,8 +88,7 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
         };
         let placement = placement(page, glyph);
         let fill = glyph.fill.unwrap_or(Color::BLACK);
-        write!(
-            html,
+        html.push_str(&format!(
             "<span class=\"text-glyph\" data-source=\"{}\" style=\"left:{}px;top:{}px;font-size:{}px;color:{};{}\">{}</span>",
             text_object.source,
             css_number(placement.left),
@@ -115,8 +97,7 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
             css_color(fill),
             render_mode_style(text_object.render_mode, glyph),
             escape_html(&unicode.to_string())
-        )
-        .unwrap();
+        ));
     }
 }
 
@@ -129,10 +110,8 @@ struct Placement {
 fn placement(page: &PageModel, glyph: &Glyph) -> Placement {
     let bounds = glyph.tight_bounds.or(glyph.loose_bounds);
     let left = bounds.map_or(glyph.origin.x, |bounds| bounds.left) - page.crop_box.left;
-    let top = bounds.map_or(
-        page.crop_box.top - glyph.origin.y - glyph.font_size,
-        |bounds| page.crop_box.top - bounds.top,
-    );
+    let top =
+        bounds.map_or(page.crop_box.top - glyph.origin.y - glyph.font_size, |bounds| page.crop_box.top - bounds.top);
     Placement { left, top }
 }
 
@@ -153,30 +132,18 @@ fn render_mode_style(mode: TextRenderMode, glyph: &Glyph) -> String {
         TextRenderMode::Stroke | TextRenderMode::FillStroke => format!(
             "font-family:sans-serif;{}{}",
             transform,
-            glyph
-                .stroke
-                .map(|color| format!("-webkit-text-stroke:1px {};", css_color(color)))
-                .unwrap_or_default()
+            glyph.stroke.map(|color| format!("-webkit-text-stroke:1px {};", css_color(color))).unwrap_or_default()
         ),
         _ => format!("font-family:sans-serif;{transform}"),
     }
 }
 
 fn css_color(color: Color) -> String {
-    format!(
-        "rgba({}, {}, {}, {:.4})",
-        color.red,
-        color.green,
-        color.blue,
-        color.alpha as f32 / 255.0
-    )
+    format!("rgba({}, {}, {}, {:.4})", color.red, color.green, color.blue, color.alpha as f32 / 255.0)
 }
 
 fn css_number(value: f32) -> String {
-    format!("{value:.4}")
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_owned()
+    format!("{value:.4}").trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 fn escape_html(value: &str) -> String {
@@ -197,43 +164,30 @@ fn escape_html(value: &str) -> String {
 #[derive(Debug, thiserror::Error)]
 pub enum OutputError {
     #[error("could not create output directory: {0}")]
-    CreateDirectory(std::io::Error),
+    CreateDirectory(io::Error),
     #[error("could not write output file: {0}")]
-    WriteFile(std::io::Error),
+    WriteFile(io::Error),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{FontCatalog, ReconstructionDecision, Rect, Size};
+    use crate::model::{AffineTransform, FallbackReason, FontCatalog, Point, ReconstructionDecision, Rect, Size};
 
     fn model_with_text(text: &str) -> DocumentModel {
         DocumentModel {
             pages: vec![PageModel {
                 number: 1,
-                size: Size {
-                    width: 612.0,
-                    height: 792.0,
-                },
-                crop_box: Rect {
-                    left: 0.0,
-                    bottom: 0.0,
-                    right: 612.0,
-                    top: 792.0,
-                },
+                size: Size { width: 612.0, height: 792.0 },
+                crop_box: Rect { left: 0.0, bottom: 0.0, right: 612.0, top: 792.0 },
                 text_objects: vec![TextObject {
                     source: 4,
                     paint_order: 4,
                     glyphs: vec![Glyph {
                         unicode: text.chars().next(),
                         font: None,
-                        origin: crate::model::Point { x: 72.0, y: 720.0 },
-                        tight_bounds: Some(Rect {
-                            left: 72.0,
-                            bottom: 710.0,
-                            right: 84.0,
-                            top: 724.0,
-                        }),
+                        origin: Point { x: 72.0, y: 720.0 },
+                        tight_bounds: Some(Rect { left: 72.0, bottom: 710.0, right: 84.0, top: 724.0 }),
                         loose_bounds: None,
                         transform: None,
                         font_size: 12.0,
@@ -263,12 +217,7 @@ mod tests {
     #[test]
     fn writer_uses_crop_box_as_page_origin() {
         let mut model = model_with_text("A");
-        model.pages[0].crop_box = Rect {
-            left: 36.0,
-            bottom: 36.0,
-            right: 576.0,
-            top: 756.0,
-        };
+        model.pages[0].crop_box = Rect { left: 36.0, bottom: 36.0, right: 576.0, top: 756.0 };
         let output = HtmlWriter::render(&model);
         assert!(output.pages[0].1.contains("width:540px;height:720px"));
         assert!(output.pages[0].1.contains("left:36px;top:32px"));
@@ -277,14 +226,8 @@ mod tests {
     #[test]
     fn writer_does_not_apply_transform_translation_twice() {
         let mut model = model_with_text("A");
-        model.pages[0].text_objects[0].glyphs[0].transform = Some(crate::model::AffineTransform {
-            a: 1.0,
-            b: 0.0,
-            c: 0.0,
-            d: 1.0,
-            e: 72.0,
-            f: 720.0,
-        });
+        model.pages[0].text_objects[0].glyphs[0].transform =
+            Some(AffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 72.0, f: 720.0 });
         let output = HtmlWriter::render(&model);
         assert!(output.pages[0].1.contains("transform:matrix(1,0,0,1,0,0)"));
     }
@@ -293,7 +236,7 @@ mod tests {
     fn fallback_text_is_not_emitted_as_native_text() {
         let mut model = model_with_text("A");
         model.pages[0].text_objects[0].reconstruction =
-            ReconstructionDecision::Background(crate::model::FallbackReason::UnprovenFontMapping);
+            ReconstructionDecision::Background(FallbackReason::UnprovenFontMapping);
         let output = HtmlWriter::render(&model);
         assert!(!output.pages[0].1.contains("data-source=\"4\""));
     }

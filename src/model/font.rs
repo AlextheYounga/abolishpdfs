@@ -11,9 +11,7 @@ pub struct FontCatalog {
 
 impl FontCatalog {
     pub fn new() -> Self {
-        Self {
-            fonts: BTreeMap::new(),
-        }
+        Self { fonts: BTreeMap::new() }
     }
 
     pub fn insert(&mut self, font: FontSource) -> FontId {
@@ -23,11 +21,7 @@ impl FontCatalog {
     }
 
     pub fn insert_or_get(&mut self, font: FontSource) -> FontId {
-        if let Some((id, _)) = self
-            .fonts
-            .iter()
-            .find(|(_, existing)| existing.name == font.name)
-        {
+        if let Some((id, _)) = self.fonts.iter().find(|(_, existing)| existing.name == font.name) {
             *id
         } else {
             self.insert(font)

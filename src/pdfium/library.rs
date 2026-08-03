@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     fmt,
     path::{Path, PathBuf},
 };
@@ -19,10 +20,7 @@ impl PdfiumLibrary {
             return Ok(Self { path: path.clone() });
         }
 
-        Err(PdfiumLibraryError {
-            expected_name: library_name().to_owned(),
-            checked_paths: candidates,
-        })
+        Err(PdfiumLibraryError { expected_name: library_name().to_owned(), checked_paths: candidates })
     }
 
     pub fn path(&self) -> &Path {
@@ -30,11 +28,7 @@ impl PdfiumLibrary {
     }
 }
 
-fn candidate_paths(
-    explicit_path: Option<&Path>,
-    env_path: Option<&Path>,
-    current_exe: &Path,
-) -> Vec<PathBuf> {
+fn candidate_paths(explicit_path: Option<&Path>, env_path: Option<&Path>, current_exe: &Path) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = explicit_path.or(env_path) {
         candidates.push(path.to_owned());
@@ -71,18 +65,19 @@ impl fmt::Display for PdfiumLibraryError {
     }
 }
 
-impl std::error::Error for PdfiumLibraryError {}
+impl Error for PdfiumLibraryError {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]
     fn explicit_library_path_takes_precedence() {
         let directory = tempdir().unwrap();
         let explicit = directory.path().join("custom-pdfium.so");
-        std::fs::write(&explicit, []).unwrap();
+        fs::write(&explicit, []).unwrap();
 
         let resolved = PdfiumLibrary::resolve(
             Some(&explicit),
@@ -98,14 +93,10 @@ mod tests {
     fn environment_path_is_used_when_explicit_path_is_absent() {
         let directory = tempdir().unwrap();
         let environment_path = directory.path().join("pdfium.so");
-        std::fs::write(&environment_path, []).unwrap();
+        fs::write(&environment_path, []).unwrap();
 
-        let resolved = PdfiumLibrary::resolve(
-            None,
-            Some(&environment_path),
-            Path::new("/missing/bin/abolishpdfs"),
-        )
-        .unwrap();
+        let resolved =
+            PdfiumLibrary::resolve(None, Some(&environment_path), Path::new("/missing/bin/abolishpdfs")).unwrap();
 
         assert_eq!(resolved.path(), environment_path);
     }
@@ -115,7 +106,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let executable = directory.path().join("abolishpdfs");
         let sibling = directory.path().join(library_name());
-        std::fs::write(&sibling, []).unwrap();
+        fs::write(&sibling, []).unwrap();
 
         let resolved = PdfiumLibrary::resolve(None, None, &executable).unwrap();
 
@@ -124,12 +115,9 @@ mod tests {
 
     #[test]
     fn missing_library_reports_all_checked_paths() {
-        let error = PdfiumLibrary::resolve(
-            Some(Path::new("/missing/explicit")),
-            None,
-            Path::new("/missing/bin/abolishpdfs"),
-        )
-        .unwrap_err();
+        let error =
+            PdfiumLibrary::resolve(Some(Path::new("/missing/explicit")), None, Path::new("/missing/bin/abolishpdfs"))
+                .unwrap_err();
 
         assert_eq!(error.checked_paths.len(), 2);
         assert!(error.to_string().contains("/missing/explicit"));

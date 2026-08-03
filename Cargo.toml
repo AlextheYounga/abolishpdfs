@@ -14,3 +14,59 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tempfile = "3.27.0"
 thiserror = "2.0.19"
+
+[lints]
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+style = { level = "allow", priority = -1 }
+perf = { level = "warn", priority = -1 }
+similar_names = "allow"
+many_single_char_names = "warn"
+module_name_repetitions = "allow"
+enum_variant_names = "allow"
+struct_field_names = "allow"
+disallowed_names = "deny"
+wildcard_imports = "warn"
+module_inception = "warn"
+too_many_arguments = "deny"
+fn_params_excessive_bools = "warn"
+large_types_passed_by_value = "warn"
+trivially_copy_pass_by_ref = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "allow"
+print_stderr = "allow"
+missing_safety_doc = "deny"
+undocumented_unsafe_blocks = "deny"
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+cast_possible_wrap = "warn"
+checked_conversions = "warn"
+absolute_paths = "warn"
+allow_attributes = "deny"
+redundant_clone = "warn"
+implicit_clone = "warn"
+semicolon_if_nothing_returned = "warn"
+match_same_arms = "warn"
+needless_pass_by_value = "warn"
+cloned_instead_of_copied = "warn"
+flat_map_option = "warn"
+from_iter_instead_of_collect = "warn"
+inefficient_to_string = "warn"
+manual_let_else = "warn"
+manual_ok_or = "warn"
+map_unwrap_or = "warn"
+unnecessary_wraps = "warn"
+
+[dev-dependencies]
+
+[dev-dependencies.syn]
+version = "2"
+features = ["full", "extra-traits", "visit"]

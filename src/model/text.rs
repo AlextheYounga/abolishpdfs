@@ -58,10 +58,7 @@ mod tests {
     #[test]
     fn missing_unicode_requires_background_fallback() {
         let decision = ReconstructionDecision::Background(FallbackReason::MissingUnicode);
-        assert_eq!(
-            decision,
-            ReconstructionDecision::Background(FallbackReason::MissingUnicode)
-        );
+        assert_eq!(decision, ReconstructionDecision::Background(FallbackReason::MissingUnicode));
         assert_ne!(decision, ReconstructionDecision::NativeText);
     }
 }

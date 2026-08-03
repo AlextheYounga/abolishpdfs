@@ -36,24 +36,11 @@ fn compatibility_manifest_has_explicit_classifications() {
     assert!(!manifest.fixtures.is_empty());
     for fixture in manifest.fixtures {
         assert!(!fixture.id.is_empty());
-        assert!(
-            Path::new("tests/fixtures").join(&fixture.path).is_file(),
-            "missing {}",
-            fixture.path
-        );
-        assert!(
-            !fixture.classifications.is_empty(),
-            "{} has no classifications",
-            fixture.id
-        );
+        assert!(Path::new("tests/fixtures").join(&fixture.path).is_file(), "missing {}", fixture.path);
+        assert!(!fixture.classifications.is_empty(), "{} has no classifications", fixture.id);
         assert!(fixture.expected.pages > 0);
         assert!(fixture.expected.text_objects_min > 0);
         assert!(fixture.expected.links <= 1);
     }
-    assert!(
-        manifest
-            .external_corpus
-            .iter()
-            .all(|entry| entry.status == "pending")
-    );
+    assert!(manifest.external_corpus.iter().all(|entry| entry.status == "pending"));
 }

@@ -1,4 +1,4 @@
-use std::process::ExitCode;
+use std::{env, process::ExitCode};
 
 use abolishpdfs::{
     cli::Cli,
@@ -11,11 +11,7 @@ fn main() -> ExitCode {
     env_logger::init();
     let cli = Cli::parse();
 
-    match PdfiumLibrary::resolve(
-        cli.pdfium_path.as_deref(),
-        None,
-        &std::env::current_exe().unwrap_or_default(),
-    ) {
+    match PdfiumLibrary::resolve(cli.pdfium_path.as_deref(), None, &env::current_exe().unwrap_or_default()) {
         Ok(library) => {
             if cli.probe {
                 match CapabilityProbe::inspect(&cli.input, &library) {
