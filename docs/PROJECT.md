@@ -127,7 +127,7 @@ extraction or output code:
 abolishpdfs --pdfium-path /path/to/libpdfium.so --probe document.pdf
 ```
 
-The JSON report records page and recursive Form XObject paint order, character
+The JSON report records the pinned PDFium binding target, page and recursive Form XObject paint order, character
 geometry and text-object association, decoded font-data availability, and a
 deactivate/render/reactivate bitmap check for text objects. A target-platform
 Milestone 1 run passes only when the report shows that suppressing active text

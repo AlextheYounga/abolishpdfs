@@ -44,11 +44,11 @@ impl CapabilityProbe {
                 .into_iter()
                 .map(FontCapability::from_pdfium)
                 .collect();
+            let mut next_paint_order = 0;
             let objects = page
                 .objects()
                 .iter()
-                .enumerate()
-                .map(|(index, object)| ObjectCapability::from_pdfium(index, object))
+                .map(|object| ObjectCapability::from_pdfium(object, &mut next_paint_order))
                 .collect();
             let text_object_rendering = TextObjectRenderingCapability::inspect(&page);
 
@@ -67,6 +67,7 @@ impl CapabilityProbe {
 
         Ok(CapabilityReport {
             pdfium_library: library.path().display().to_string(),
+            pdfium_bindings: "pdfium_7881",
             page_count: pages.len(),
             font_mapping: FontMappingCapability::for_pdfium_render_0_9_3(),
             pages,
@@ -77,6 +78,7 @@ impl CapabilityProbe {
 #[derive(Debug, Serialize, PartialEq)]
 pub struct CapabilityReport {
     pub pdfium_library: String,
+    pub pdfium_bindings: &'static str,
     pub page_count: usize,
     pub font_mapping: FontMappingCapability,
     pub pages: Vec<CapabilityPage>,
@@ -169,7 +171,9 @@ pub struct ObjectCapability {
 }
 
 impl ObjectCapability {
-    fn from_pdfium(paint_order: usize, object: PdfPageObject<'_>) -> Self {
+    fn from_pdfium(object: PdfPageObject<'_>, next_paint_order: &mut usize) -> Self {
+        let paint_order = *next_paint_order;
+        *next_paint_order += 1;
         let (active, active_error) = match object.is_active() {
             Ok(active) => (Some(active), None),
             Err(error) => (None, Some(error.to_string())),
@@ -184,8 +188,7 @@ impl ObjectCapability {
             PdfPageObject::XObjectForm(form) => (
                 "form",
                 form.iter()
-                    .enumerate()
-                    .map(|(index, object)| Self::from_pdfium(index, object))
+                    .map(|object| Self::from_pdfium(object, next_paint_order))
                     .collect(),
             ),
         };
@@ -341,6 +344,7 @@ mod tests {
     fn serializes_owned_diagnostic_values() {
         let report = CapabilityReport {
             pdfium_library: "/release/libpdfium.so".to_owned(),
+            pdfium_bindings: "pdfium_7881",
             page_count: 1,
             font_mapping: FontMappingCapability::for_pdfium_render_0_9_3(),
             pages: vec![CapabilityPage {
