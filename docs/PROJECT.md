@@ -145,9 +145,10 @@ abolishpdfs --pdfium-path /path/to/libpdfium.so --diagnostic document.pdf
 ```
 
 This output is a serialized `DocumentModel`. It contains no PDFium handles and
-records conservative background fallback decisions instead of silently treating
-uncertain text as reconstructable. It is an inspection artifact, not the final
-HTML output contract.
+records crop boxes, object-associated characters, recursive Form XObject
+contents, and conservative background fallback decisions instead of silently
+treating uncertain text as reconstructable. It is an inspection artifact, not
+the final HTML output contract.
 
 Milestone 3 writes the first HTML artifact set from that model:
 
@@ -156,9 +157,12 @@ abolishpdfs --pdfium-path /path/to/libpdfium.so --output output document.pdf
 ```
 
 The writer produces `index.html`, `document.css`, and split page files under
-`pages/`. Native text is positioned in PDF-point-sized page containers; text
-that the model marks for background fallback is intentionally not duplicated in
-the native layer until selective raster backgrounds are implemented.
+`pages/`. The index displays the split pages, while each page uses its crop box
+as the CSS viewport origin. Native text is emitted per glyph so geometry, color,
+stroke, and transforms do not incorrectly inherit from the first glyph in a
+mixed text object. Text that the model marks for background fallback is
+intentionally not duplicated in the native layer until selective raster
+backgrounds are implemented.
 
 Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.

@@ -20,6 +20,7 @@ pub struct GraphicsObject {
     pub kind: GraphicsKind,
     pub bounds: Option<Rect>,
     pub active: Option<bool>,
+    pub children: Vec<GraphicsObject>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

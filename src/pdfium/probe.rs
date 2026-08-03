@@ -240,10 +240,8 @@ impl TextObjectRenderingCapability {
             match object.is_active() {
                 Ok(active) => {
                     originally_active.push(active);
-                    if active {
-                        if let Err(error) = object.set_inactive() {
-                            result.deactivation_error = Some(error.to_string());
-                        }
+                    if active && let Err(error) = object.set_inactive() {
+                        result.deactivation_error = Some(error.to_string());
                     }
                 }
                 Err(error) => {
@@ -262,10 +260,8 @@ impl TextObjectRenderingCapability {
         }
 
         for (object, was_active) in text_objects.iter_mut().zip(originally_active) {
-            if was_active {
-                if let Err(error) = object.set_active() {
-                    result.reactivation_error = Some(error.to_string());
-                }
+            if was_active && let Err(error) = object.set_active() {
+                result.reactivation_error = Some(error.to_string());
             }
         }
 

@@ -8,7 +8,8 @@ html, body { margin: 0; padding: 0; background: #666; }
 body { padding: 24px; }
 .document { display: flex; flex-direction: column; align-items: center; gap: 24px; }
 .page { position: relative; overflow: hidden; background: white; box-shadow: 0 2px 12px #2228; }
-.text-object { position: absolute; white-space: pre; transform-origin: left bottom; }
+.text-glyph { position: absolute; white-space: pre; transform-origin: left bottom; }
+.page-frame { border: 0; display: block; }
 "#;
 
 pub struct HtmlWriter;
@@ -55,10 +56,15 @@ fn render_index(pages: &[PageModel]) -> String {
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>PDF</title><link rel=\"stylesheet\" href=\"document.css\"></head><body><main class=\"document\">",
     );
     for page in pages {
+        let page_width = page.crop_box.right - page.crop_box.left;
+        let page_height = page.crop_box.top - page.crop_box.bottom;
         write!(
             html,
-            "<a href=\"pages/{}.html\">Page {}</a>",
-            page.number, page.number
+            "<iframe class=\"page-frame\" title=\"Page {}\" src=\"pages/{}.html\" style=\"width:{}px;height:{}px\"></iframe>",
+            page.number,
+            page.number,
+            css_number(page_width),
+            css_number(page_height)
         )
         .unwrap();
     }
@@ -68,13 +74,15 @@ fn render_index(pages: &[PageModel]) -> String {
 
 fn render_page(page: &PageModel) -> String {
     let mut html = String::new();
+    let page_width = page.crop_box.right - page.crop_box.left;
+    let page_height = page.crop_box.top - page.crop_box.bottom;
     write!(
         html,
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Page {}</title><link rel=\"stylesheet\" href=\"../document.css\"></head><body><main class=\"document\"><section class=\"page\" aria-label=\"Page {}\" style=\"width:{}px;height:{}px\">",
         page.number,
         page.number,
-        css_number(page.size.width),
-        css_number(page.size.height)
+        css_number(page_width),
+        css_number(page_height)
     )
     .unwrap();
     for text_object in &page.text_objects {
@@ -91,28 +99,25 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
     ) {
         return;
     }
-    let text = text_object
-        .glyphs
-        .iter()
-        .filter_map(|glyph| glyph.unicode)
-        .collect::<String>();
-    let Some(first) = text_object.glyphs.first() else {
-        return;
-    };
-    let placement = placement(page, first);
-    let fill = first.fill.unwrap_or(Color::BLACK);
-    write!(
-        html,
-        "<span class=\"text-object\" data-source=\"{}\" style=\"left:{}px;top:{}px;font-size:{}px;color:{};{}\">{}</span>",
-        text_object.source,
-        css_number(placement.left),
-        css_number(placement.top),
-        css_number(first.font_size),
-        css_color(fill),
-        render_mode_style(text_object.render_mode, first),
-        escape_html(&text)
-    )
-    .unwrap();
+    for glyph in &text_object.glyphs {
+        let Some(unicode) = glyph.unicode else {
+            continue;
+        };
+        let placement = placement(page, glyph);
+        let fill = glyph.fill.unwrap_or(Color::BLACK);
+        write!(
+            html,
+            "<span class=\"text-glyph\" data-source=\"{}\" style=\"left:{}px;top:{}px;font-size:{}px;color:{};{}\">{}</span>",
+            text_object.source,
+            css_number(placement.left),
+            css_number(placement.top),
+            css_number(glyph.font_size),
+            css_color(fill),
+            render_mode_style(text_object.render_mode, glyph),
+            escape_html(&unicode.to_string())
+        )
+        .unwrap();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,10 +128,10 @@ struct Placement {
 
 fn placement(page: &PageModel, glyph: &Glyph) -> Placement {
     let bounds = glyph.tight_bounds.or(glyph.loose_bounds);
-    let left = bounds.map_or(glyph.origin.x, |bounds| bounds.left);
+    let left = bounds.map_or(glyph.origin.x, |bounds| bounds.left) - page.crop_box.left;
     let top = bounds.map_or(
-        page.size.height - glyph.origin.y - glyph.font_size,
-        |bounds| page.size.height - bounds.top,
+        page.crop_box.top - glyph.origin.y - glyph.font_size,
+        |bounds| page.crop_box.top - bounds.top,
     );
     Placement { left, top }
 }
@@ -136,13 +141,11 @@ fn render_mode_style(mode: TextRenderMode, glyph: &Glyph) -> String {
         .transform
         .map(|matrix| {
             format!(
-                "transform:matrix({},{},{},{},{},{});",
+                "transform:matrix({},{},{},{},0,0);",
                 css_number(matrix.a),
                 css_number(matrix.b),
                 css_number(matrix.c),
-                css_number(matrix.d),
-                css_number(matrix.e),
-                css_number(matrix.f)
+                css_number(matrix.d)
             )
         })
         .unwrap_or_default();
@@ -258,6 +261,35 @@ mod tests {
     }
 
     #[test]
+    fn writer_uses_crop_box_as_page_origin() {
+        let mut model = model_with_text("A");
+        model.pages[0].crop_box = Rect {
+            left: 36.0,
+            bottom: 36.0,
+            right: 576.0,
+            top: 756.0,
+        };
+        let output = HtmlWriter::render(&model);
+        assert!(output.pages[0].1.contains("width:540px;height:720px"));
+        assert!(output.pages[0].1.contains("left:36px;top:32px"));
+    }
+
+    #[test]
+    fn writer_does_not_apply_transform_translation_twice() {
+        let mut model = model_with_text("A");
+        model.pages[0].text_objects[0].glyphs[0].transform = Some(crate::model::AffineTransform {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 72.0,
+            f: 720.0,
+        });
+        let output = HtmlWriter::render(&model);
+        assert!(output.pages[0].1.contains("transform:matrix(1,0,0,1,0,0)"));
+    }
+
+    #[test]
     fn fallback_text_is_not_emitted_as_native_text() {
         let mut model = model_with_text("A");
         model.pages[0].text_objects[0].reconstruction =
@@ -275,5 +307,7 @@ mod tests {
         assert!(directory.path().join("document.css").is_file());
         assert!(directory.path().join("pages/1.html").is_file());
         assert!(directory.path().join("assets").is_dir());
+        let index = fs::read_to_string(directory.path().join("index.html")).unwrap();
+        assert!(index.contains("class=\"page-frame\""));
     }
 }

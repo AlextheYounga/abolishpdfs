@@ -45,12 +45,17 @@ impl DocumentExtractor {
 fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> PageModel {
     let width = page.width().value;
     let height = page.height().value;
-    let crop_box = Rect {
-        left: 0.0,
-        bottom: 0.0,
-        right: width,
-        top: height,
-    };
+    let crop_box = page
+        .boundaries()
+        .crop()
+        .ok()
+        .map(|boundary| rect(boundary.bounds))
+        .unwrap_or(Rect {
+            left: 0.0,
+            bottom: 0.0,
+            right: width,
+            top: height,
+        });
     let mut font_ids = HashMap::new();
 
     for font in page.fonts() {
@@ -65,15 +70,6 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
     }
 
     let page_text = page.text().ok();
-    let glyphs = page_text
-        .as_ref()
-        .map(|text| {
-            text.chars()
-                .iter()
-                .map(|character| extract_glyph(&character, model, &font_ids))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
     if page_text.is_none() {
         model.diagnostics.push(DocumentDiagnostic {
             scope: DiagnosticScope::Page(index + 1),
@@ -81,49 +77,20 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         });
     }
 
-    let mut text_offset = 0;
     let mut text_objects = Vec::new();
     let mut graphics = Vec::new();
-    for (paint_order, object) in page.objects().iter().enumerate() {
-        match &object {
-            PdfPageObject::Text(text) => {
-                let source_text = text.text();
-                let count = source_text.chars().count();
-                let object_glyphs = glyphs
-                    .iter()
-                    .skip(text_offset)
-                    .take(count)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                text_offset += count;
-                let font = first_font_id(model);
-                let font = object_glyphs
-                    .first()
-                    .and_then(|glyph| glyph.font)
-                    .unwrap_or(font);
-                let render_mode = text_render_mode(text.render_mode());
-                let object_transform = text.matrix().ok().map(affine_transform);
-                let mut object_glyphs = object_glyphs;
-                for glyph in &mut object_glyphs {
-                    glyph.transform = object_transform;
-                }
-                let reconstruction =
-                    reconstruction_decision(&object_glyphs, font, render_mode, model);
-                text_objects.push(TextObject {
-                    source: paint_order,
-                    paint_order,
-                    glyphs: object_glyphs,
-                    font,
-                    render_mode,
-                    reconstruction,
-                });
-            }
-            _ => graphics.push(GraphicsObject {
-                paint_order,
-                kind: graphics_kind(&object),
-                bounds: object.bounds().ok().map(|bounds| rect(bounds.to_rect())),
-                active: object.is_active().ok(),
-            }),
+    let mut next_paint_order = 0;
+    for object in page.objects().iter() {
+        if let Some(graphics_object) = extract_object(
+            &object,
+            page_text.as_ref(),
+            model,
+            &font_ids,
+            &mut text_objects,
+            &mut next_paint_order,
+            index + 1,
+        ) {
+            graphics.push(graphics_object);
         }
     }
 
@@ -148,20 +115,99 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
     }
 }
 
+fn extract_object(
+    object: &PdfPageObject<'_>,
+    page_text: Option<&PdfPageText<'_>>,
+    model: &mut DocumentModel,
+    font_ids: &HashMap<String, FontId>,
+    text_objects: &mut Vec<TextObject>,
+    next_paint_order: &mut usize,
+    page_number: usize,
+) -> Option<GraphicsObject> {
+    let paint_order = *next_paint_order;
+    *next_paint_order += 1;
+
+    if let PdfPageObject::Text(text) = object {
+        let object_glyphs = match page_text {
+            Some(text_page) => match text_page.chars_for_object(text) {
+                Ok(characters) => characters
+                    .iter()
+                    .map(|character| extract_glyph(&character, model, font_ids))
+                    .collect::<Vec<_>>(),
+                Err(error) => {
+                    model.diagnostics.push(DocumentDiagnostic {
+                        scope: DiagnosticScope::Object {
+                            page: page_number,
+                            paint_order,
+                        },
+                        message: format!("could not extract characters: {error}"),
+                    });
+                    Vec::new()
+                }
+            },
+            None => Vec::new(),
+        };
+        let font = object_glyphs
+            .first()
+            .and_then(|glyph| glyph.font)
+            .unwrap_or_else(|| first_font_id(model));
+        let render_mode = text_render_mode(text.render_mode());
+        let object_transform = text.matrix().ok().map(affine_transform);
+        let mut object_glyphs = object_glyphs;
+        for glyph in &mut object_glyphs {
+            glyph.transform = object_transform;
+        }
+        let reconstruction = reconstruction_decision(&object_glyphs, font, render_mode, model);
+        text_objects.push(TextObject {
+            source: paint_order,
+            paint_order,
+            glyphs: object_glyphs,
+            font,
+            render_mode,
+            reconstruction,
+        });
+        return None;
+    }
+
+    let children = match object {
+        PdfPageObject::XObjectForm(form) => form
+            .iter()
+            .filter_map(|child| {
+                extract_object(
+                    &child,
+                    page_text,
+                    model,
+                    font_ids,
+                    text_objects,
+                    next_paint_order,
+                    page_number,
+                )
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Some(GraphicsObject {
+        paint_order,
+        kind: graphics_kind(object),
+        bounds: object.bounds().ok().map(|bounds| rect(bounds.to_rect())),
+        active: object.is_active().ok(),
+        children,
+    })
+}
+
 fn extract_glyph(
     character: &PdfPageTextChar<'_>,
     model: &mut DocumentModel,
     font_ids: &HashMap<String, FontId>,
 ) -> Glyph {
     let font_name = character.font_name();
-    if let Some(id) = font_ids.get(&font_name) {
-        if let Some(unicode) = character.unicode_char() {
-            if let Some(font) = model.fonts.fonts.get_mut(id) {
-                if !font.used_unicode.contains(&unicode) {
-                    font.used_unicode.push(unicode);
-                }
-            }
-        }
+    if let Some(id) = font_ids.get(&font_name)
+        && let Some(unicode) = character.unicode_char()
+        && let Some(font) = model.fonts.fonts.get_mut(id)
+        && !font.used_unicode.contains(&unicode)
+    {
+        font.used_unicode.push(unicode);
     }
     let origin = character.origin().ok();
     Glyph {
