@@ -180,6 +180,13 @@ order, bounds, activity, and recursive form children. Pages containing graphics 
 so vector and image content remains visually faithful while reconstructed text, links, and document navigation stay
 browser-native overlays. Pages without graphics continue to avoid unnecessary raster assets.
 
+## Phase 6: Embedded font output
+
+Embedded font bytes collected by PDFium are now written as deterministic font assets and referenced by generated
+`@font-face` rules. Native glyph spans select their model font when embedded data is available, while fonts without
+usable data retain the browser's sans-serif fallback. Background text remains raster-backed when its mapping or
+geometry is not proven safe for native reconstruction.
+
 Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.
 Their expected feature classifications are stored in `tests/fixtures/manifest.json` and

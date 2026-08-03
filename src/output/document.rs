@@ -1,8 +1,8 @@
 use std::{fs, io, path::Path};
 
 use crate::model::{
-    Color, DocumentModel, Glyph, Link, LinkTarget, OutlineItem, PageModel, ReconstructionDecision, TextObject,
-    TextRenderMode,
+    Color, DocumentModel, FontCatalog, Glyph, Link, LinkTarget, OutlineItem, PageModel, ReconstructionDecision,
+    TextObject, TextRenderMode,
 };
 
 const DOCUMENT_CSS: &str = r#":root { color-scheme: light; }
@@ -29,17 +29,32 @@ pub struct HtmlDocument {
 
 impl HtmlWriter {
     pub fn render(model: &DocumentModel) -> HtmlDocument {
-        let pages =
-            model.pages.iter().map(|page| (format!("{}.html", page.number), render_page(page))).collect::<Vec<_>>();
+        let pages = model
+            .pages
+            .iter()
+            .map(|page| (format!("{}.html", page.number), render_page(page, &model.fonts)))
+            .collect::<Vec<_>>();
         let index_html = render_index(model);
-        let assets = model
+        let mut assets = model
             .pages
             .iter()
             .filter_map(|page| {
                 page.background.as_ref().map(|background| (format!("page-{}.png", page.number), background.png.clone()))
             })
-            .collect();
-        HtmlDocument { index_html, document_css: DOCUMENT_CSS.to_owned(), pages, assets }
+            .collect::<Vec<_>>();
+        let mut font_css = String::new();
+        for (id, font) in &model.fonts.fonts {
+            let Some(data) = font.data.as_ref() else {
+                continue;
+            };
+            let extension = font_extension(data);
+            font_css.push_str(&format!(
+                "@font-face{{font-family:'pdf-font-{}';src:url('assets/font-{}.{}');}}\n",
+                id, id, extension
+            ));
+            assets.push((format!("font-{}.{}", id, extension), data.clone()));
+        }
+        HtmlDocument { index_html, document_css: format!("{font_css}{DOCUMENT_CSS}"), pages, assets }
     }
 
     pub fn write_to(model: &DocumentModel, output: &Path) -> Result<(), OutputError> {
@@ -84,7 +99,7 @@ fn render_index(model: &DocumentModel) -> String {
     html
 }
 
-fn render_page(page: &PageModel) -> String {
+fn render_page(page: &PageModel, fonts: &FontCatalog) -> String {
     let page_width = page.crop_box.right - page.crop_box.left;
     let page_height = page.crop_box.top - page.crop_box.bottom;
     let mut html = format!(
@@ -98,7 +113,7 @@ fn render_page(page: &PageModel) -> String {
         html.push_str(&format!("<img class=\"page-background\" alt=\"\" src=\"../assets/page-{}.png\">", page.number));
     }
     for text_object in &page.text_objects {
-        render_text_object(&mut html, page, text_object);
+        render_text_object(&mut html, page, text_object, fonts);
     }
     for link in &page.links {
         render_link(&mut html, page, link);
@@ -107,7 +122,7 @@ fn render_page(page: &PageModel) -> String {
     html
 }
 
-fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObject) {
+fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObject, fonts: &FontCatalog) {
     if !matches!(text_object.reconstruction, ReconstructionDecision::NativeText) {
         return;
     }
@@ -117,6 +132,8 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
         };
         let placement = placement(page, glyph);
         let fill = glyph.fill.unwrap_or(Color::BLACK);
+        let font_family =
+            glyph.font.and_then(|id| fonts.fonts.get(&id).and_then(|font| font.data.as_ref()).map(|_| id));
         html.push_str(&format!(
             "<span class=\"text-glyph\" data-source=\"{}\" style=\"left:{}px;top:{}px;font-size:{}px;color:{};{}\">{}</span>",
             text_object.source,
@@ -124,7 +141,7 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
             css_number(placement.top),
             css_number(glyph.font_size),
             css_color(fill),
-            render_mode_style(text_object.render_mode, glyph),
+            render_mode_style(text_object.render_mode, glyph, font_family),
             escape_html(&unicode.to_string())
         ));
     }
@@ -199,7 +216,8 @@ fn placement(page: &PageModel, glyph: &Glyph) -> Placement {
     Placement { left, top }
 }
 
-fn render_mode_style(mode: TextRenderMode, glyph: &Glyph) -> String {
+fn render_mode_style(mode: TextRenderMode, glyph: &Glyph, font_family: Option<usize>) -> String {
+    let family = font_family.map_or_else(|| "sans-serif".to_owned(), |id| format!("'pdf-font-{id}',sans-serif"));
     let transform = glyph
         .transform
         .map(|matrix| {
@@ -214,11 +232,22 @@ fn render_mode_style(mode: TextRenderMode, glyph: &Glyph) -> String {
         .unwrap_or_default();
     match mode {
         TextRenderMode::Stroke | TextRenderMode::FillStroke => format!(
-            "font-family:sans-serif;{}{}",
+            "font-family:{family};{}{}",
             transform,
             glyph.stroke.map(|color| format!("-webkit-text-stroke:1px {};", css_color(color))).unwrap_or_default()
         ),
-        _ => format!("font-family:sans-serif;{transform}"),
+        _ => format!("font-family:{family};{transform}"),
+    }
+}
+
+fn font_extension(data: &[u8]) -> &'static str {
+    match data.get(..4) {
+        Some([0, 1, 0, 0]) => "ttf",
+        Some([b'O', b'T', b'T', b'O']) => "otf",
+        Some([b't', b't', b'c', b'f']) => "ttc",
+        Some([b'w', b'O', b'F', b'F']) => "woff",
+        Some([b'w', b'O', b'F', b'2']) => "woff2",
+        _ => "bin",
     }
 }
 
@@ -254,144 +283,5 @@ pub enum OutputError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::{
-        AffineTransform, FallbackReason, FontCatalog, Point, RasterBackground, ReconstructionDecision, Rect, Size,
-    };
-
-    fn model_with_text(text: &str) -> DocumentModel {
-        DocumentModel {
-            pages: vec![PageModel {
-                number: 1,
-                size: Size { width: 612.0, height: 792.0 },
-                crop_box: Rect { left: 0.0, bottom: 0.0, right: 612.0, top: 792.0 },
-                text_objects: vec![TextObject {
-                    source: 4,
-                    paint_order: 4,
-                    glyphs: vec![Glyph {
-                        unicode: text.chars().next(),
-                        font: None,
-                        origin: Point { x: 72.0, y: 720.0 },
-                        tight_bounds: Some(Rect { left: 72.0, bottom: 710.0, right: 84.0, top: 724.0 }),
-                        loose_bounds: None,
-                        transform: None,
-                        font_size: 12.0,
-                        fill: Some(Color::BLACK),
-                        stroke: None,
-                        generated_by_pdfium: Some(false),
-                    }],
-                    font: 0,
-                    render_mode: TextRenderMode::Fill,
-                    reconstruction: ReconstructionDecision::NativeText,
-                }],
-                graphics: Vec::new(),
-                links: Vec::new(),
-                background: None,
-            }],
-            fonts: FontCatalog::new(),
-            outlines: Vec::new(),
-            diagnostics: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn writer_converts_pdf_coordinates_to_css_coordinates() {
-        let output = HtmlWriter::render(&model_with_text("<"));
-        assert!(output.pages[0].1.contains("left:72px;top:68px"));
-        assert!(output.pages[0].1.contains("&lt;"));
-    }
-
-    #[test]
-    fn writer_uses_crop_box_as_page_origin() {
-        let mut model = model_with_text("A");
-        model.pages[0].crop_box = Rect { left: 36.0, bottom: 36.0, right: 576.0, top: 756.0 };
-        let output = HtmlWriter::render(&model);
-        assert!(output.pages[0].1.contains("width:540px;height:720px"));
-        assert!(output.pages[0].1.contains("left:36px;top:32px"));
-    }
-
-    #[test]
-    fn writer_does_not_apply_transform_translation_twice() {
-        let mut model = model_with_text("A");
-        model.pages[0].text_objects[0].glyphs[0].transform =
-            Some(AffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 72.0, f: 720.0 });
-        let output = HtmlWriter::render(&model);
-        assert!(output.pages[0].1.contains("transform:matrix(1,0,0,1,0,0)"));
-    }
-
-    #[test]
-    fn fallback_text_is_not_emitted_as_native_text() {
-        let mut model = model_with_text("A");
-        model.pages[0].text_objects[0].reconstruction =
-            ReconstructionDecision::Background(FallbackReason::UnprovenFontMapping);
-        let output = HtmlWriter::render(&model);
-        assert!(!output.pages[0].1.contains("data-source=\"4\""));
-    }
-
-    #[test]
-    fn writer_renders_safe_uri_links_at_pdf_coordinates() {
-        let mut model = model_with_text("A");
-        model.pages[0].links.push(Link {
-            bounds: Rect { left: 36.0, bottom: 700.0, right: 144.0, top: 736.0 },
-            target: LinkTarget::Uri("https://example.com/?a=1&b=2".to_owned()),
-        });
-
-        let output = HtmlWriter::render(&model);
-
-        assert!(output.pages[0].1.contains(
-            "class=\"page-link\" aria-label=\"PDF link\" data-target=\"uri\" href=\"https://example.com/?a=1&amp;b=2\" style=\"left:36px;top:56px;width:108px;height:36px\""
-        ));
-    }
-
-    #[test]
-    fn writer_renders_local_links_and_outline_navigation() {
-        let mut model = model_with_text("A");
-        model.pages[0].links.push(Link {
-            bounds: Rect { left: 0.0, bottom: 0.0, right: 10.0, top: 10.0 },
-            target: LinkTarget::LocalDestination(2),
-        });
-        model.outlines.push(OutlineItem {
-            title: "Intro & setup".to_owned(),
-            target_page: Some(1),
-            children: Vec::new(),
-        });
-
-        let output = HtmlWriter::render(&model);
-
-        assert!(output.pages[0].1.contains("data-target=\"local\" href=\"../pages/2.html\""));
-        assert!(output.index_html.contains("href=\"pages/1.html\">Intro &amp; setup</a>"));
-    }
-
-    #[test]
-    fn writer_does_not_create_unsafe_uri_navigation() {
-        let mut model = model_with_text("A");
-        model.pages[0].links.push(Link {
-            bounds: Rect { left: 0.0, bottom: 0.0, right: 10.0, top: 10.0 },
-            target: LinkTarget::Uri("javascript:alert(1)".to_owned()),
-        });
-
-        let output = HtmlWriter::render(&model);
-
-        assert!(output.pages[0].1.contains("data-target=\"uri\" style="));
-        assert!(!output.pages[0].1.contains("href=\"javascript:"));
-    }
-
-    #[test]
-    fn writer_creates_split_page_artifacts() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut model = model_with_text("A");
-        model.pages[0].background = Some(RasterBackground { width: 2, height: 2, png: vec![137, 80, 78, 71] });
-        HtmlWriter::write_to(&model, directory.path()).unwrap();
-
-        assert!(directory.path().join("index.html").is_file());
-        assert!(directory.path().join("document.css").is_file());
-        assert!(directory.path().join("pages/1.html").is_file());
-        assert!(directory.path().join("assets/page-1.png").is_file());
-        assert!(directory.path().join("assets").is_dir());
-        let index = fs::read_to_string(directory.path().join("index.html")).unwrap();
-        assert!(index.contains("class=\"page-frame\""));
-        let page = fs::read_to_string(directory.path().join("pages/1.html")).unwrap();
-        assert!(page.contains("class=\"page-background\""));
-    }
-}
+#[path = "document_tests.rs"]
+mod tests;
