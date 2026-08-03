@@ -12,6 +12,14 @@ pub struct PageModel {
     pub text_objects: Vec<TextObject>,
     pub graphics: Vec<GraphicsObject>,
     pub links: Vec<Link>,
+    pub background: Option<RasterBackground>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RasterBackground {
+    pub width: u32,
+    pub height: u32,
+    pub png: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

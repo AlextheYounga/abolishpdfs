@@ -1,11 +1,12 @@
 use serde::Serialize;
 
-use super::{FontCatalog, PageModel};
+use super::{FontCatalog, OutlineItem, PageModel};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DocumentModel {
     pub pages: Vec<PageModel>,
     pub fonts: FontCatalog,
+    pub outlines: Vec<OutlineItem>,
     pub diagnostics: Vec<DocumentDiagnostic>,
 }
 

@@ -1,11 +1,16 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Cursor,
+    path::Path,
+};
 
+use image::ImageFormat;
 use pdfium_render::prelude::*;
 
 use crate::model::{
     AffineTransform, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FallbackReason, FontCatalog, FontId,
-    FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, PageModel, Point, ReconstructionDecision, Rect,
-    Size, TextObject, TextRenderMode,
+    FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel, Point, RasterBackground,
+    ReconstructionDecision, Rect, Size, TextObject, TextRenderMode,
 };
 
 use super::PdfiumLibrary;
@@ -20,6 +25,7 @@ impl DocumentExtractor {
         let mut model = DocumentModel {
             pages: Vec::with_capacity(usize::try_from(document.pages().len()).unwrap_or_default()),
             fonts: FontCatalog::new(),
+            outlines: Vec::new(),
             diagnostics: Vec::new(),
         };
 
@@ -30,6 +36,7 @@ impl DocumentExtractor {
             let page_model = extract_page(&page, page_index, &mut model);
             model.pages.push(page_model);
         }
+        model.outlines = extract_outlines(&document);
 
         Ok(model)
     }
@@ -67,18 +74,37 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
     let mut text_objects = Vec::new();
     let mut graphics = Vec::new();
     let mut next_paint_order = 0;
-    let mut context = ExtractionContext {
-        model,
-        font_ids: &font_ids,
-        text_objects: &mut text_objects,
-        next_paint_order: &mut next_paint_order,
-        page_number: index + 1,
-    };
-    for object in page.objects().iter() {
-        if let Some(graphics_object) = extract_object(&object, page_text.as_ref(), &mut context) {
-            graphics.push(graphics_object);
+    let fallback_paint_orders = {
+        let mut context = ExtractionContext {
+            model,
+            font_ids: &font_ids,
+            text_objects: &mut text_objects,
+            next_paint_order: &mut next_paint_order,
+            fallback_paint_orders: Vec::new(),
+            page_number: index + 1,
+        };
+        for object in page.objects().iter() {
+            if let Some(graphics_object) = extract_object(&object, page_text.as_ref(), &mut context) {
+                graphics.push(graphics_object);
+            }
         }
-    }
+        context.fallback_paint_orders
+    };
+
+    let background = if fallback_paint_orders.is_empty() {
+        None
+    } else {
+        match render_fallback_background(page, &fallback_paint_orders) {
+            Ok(background) => Some(background),
+            Err(error) => {
+                model.diagnostics.push(DocumentDiagnostic {
+                    scope: DiagnosticScope::Page(index + 1),
+                    message: format!("could not render fallback background: {error}"),
+                });
+                None
+            }
+        }
+    };
 
     let links = page
         .links()
@@ -86,7 +112,7 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         .filter_map(|link| link.rect().ok().map(|bounds| Link { bounds: rect(bounds), target: link_target(&link) }))
         .collect();
 
-    PageModel { number: index + 1, size: Size { width, height }, crop_box, text_objects, graphics, links }
+    PageModel { number: index + 1, size: Size { width, height }, crop_box, text_objects, graphics, links, background }
 }
 
 struct ExtractionContext<'a, 'b> {
@@ -94,6 +120,7 @@ struct ExtractionContext<'a, 'b> {
     font_ids: &'b HashMap<String, FontId>,
     text_objects: &'a mut Vec<TextObject>,
     next_paint_order: &'a mut usize,
+    fallback_paint_orders: Vec<usize>,
     page_number: usize,
 }
 
@@ -129,6 +156,9 @@ fn extract_object(
             glyph.transform = object_transform;
         }
         let reconstruction = reconstruction_decision(&object_glyphs, font, render_mode, context.model);
+        if matches!(reconstruction, ReconstructionDecision::Background(_)) {
+            context.fallback_paint_orders.push(paint_order);
+        }
         context.text_objects.push(TextObject {
             source: paint_order,
             paint_order,
@@ -210,18 +240,113 @@ fn first_font_id(model: &DocumentModel) -> FontId {
 
 fn link_target(link: &PdfLink<'_>) -> LinkTarget {
     let Some(action) = link.action() else {
-        return if link.destination().is_some() { LinkTarget::LocalDestination } else { LinkTarget::Unknown };
+        return link
+            .destination()
+            .and_then(|destination| destination.page_index().ok())
+            .and_then(|index| usize::try_from(index).ok())
+            .map_or(LinkTarget::Unknown, |index| LinkTarget::LocalDestination(index + 1));
     };
     if let Some(uri) = action.as_uri_action().and_then(|uri| uri.uri().ok()) {
         return LinkTarget::Uri(uri);
     }
-    if action.as_local_destination_action().is_some() {
-        LinkTarget::LocalDestination
+    if let Some(local) = action.as_local_destination_action() {
+        local
+            .destination()
+            .ok()
+            .and_then(|destination| destination.page_index().ok())
+            .and_then(|index| usize::try_from(index).ok())
+            .map_or(LinkTarget::Unknown, |index| LinkTarget::LocalDestination(index + 1))
     } else if action.as_remote_destination_action().is_some() {
         LinkTarget::RemoteDestination
     } else {
         LinkTarget::Unknown
     }
+}
+
+fn extract_outlines(document: &PdfDocument<'_>) -> Vec<OutlineItem> {
+    let mut outlines = Vec::new();
+    let mut bookmark = document.bookmarks().root();
+    while let Some(current) = bookmark {
+        outlines.push(outline_item(&current));
+        bookmark = current.next_sibling();
+    }
+    outlines
+}
+
+fn outline_item(bookmark: &PdfBookmark<'_>) -> OutlineItem {
+    let mut children = Vec::new();
+    let mut child = bookmark.first_child();
+    while let Some(current) = child {
+        children.push(outline_item(&current));
+        child = current.next_sibling();
+    }
+    let target_page = bookmark
+        .destination()
+        .and_then(|destination| destination.page_index().ok())
+        .and_then(|index| usize::try_from(index).ok())
+        .map(|index| index + 1);
+    OutlineItem { title: bookmark.title().unwrap_or_else(|| "Untitled".to_owned()), target_page, children }
+}
+
+fn render_fallback_background(
+    page: &PdfPage<'_>,
+    fallback_paint_orders: &[usize],
+) -> Result<RasterBackground, PdfiumError> {
+    let fallback_paint_orders = fallback_paint_orders.iter().copied().collect::<HashSet<_>>();
+    set_native_text_activity(page, &fallback_paint_orders, false)?;
+    let rendered =
+        page.render_with_config(&PdfRenderConfig::new().set_target_width(1200)).and_then(|bitmap| encode_png(&bitmap));
+    let restore_result = set_native_text_activity(page, &fallback_paint_orders, true);
+    restore_result.and(rendered)
+}
+
+fn set_native_text_activity(
+    page: &PdfPage<'_>,
+    fallback_paint_orders: &HashSet<usize>,
+    active: bool,
+) -> Result<(), PdfiumError> {
+    let mut paint_order = 0;
+    for mut object in page.objects().iter() {
+        set_native_object_activity(&mut object, fallback_paint_orders, &mut paint_order, active)?;
+    }
+    Ok(())
+}
+
+fn set_native_object_activity(
+    object: &mut PdfPageObject<'_>,
+    fallback_paint_orders: &HashSet<usize>,
+    paint_order: &mut usize,
+    active: bool,
+) -> Result<(), PdfiumError> {
+    let current_order = *paint_order;
+    *paint_order += 1;
+    match object {
+        PdfPageObject::Text(_) if !fallback_paint_orders.contains(&current_order) => {
+            if active {
+                object.set_active()
+            } else {
+                object.set_inactive()
+            }
+        }
+        PdfPageObject::XObjectForm(form) => {
+            for mut child in form.iter() {
+                set_native_object_activity(&mut child, fallback_paint_orders, paint_order, active)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn encode_png(bitmap: &PdfBitmap<'_>) -> Result<RasterBackground, PdfiumError> {
+    let image = bitmap.as_image()?;
+    let mut png = Cursor::new(Vec::new());
+    image.write_to(&mut png, ImageFormat::Png).map_err(|_| PdfiumError::ImageError)?;
+    Ok(RasterBackground {
+        width: u32::try_from(bitmap.width()).unwrap_or_default(),
+        height: u32::try_from(bitmap.height()).unwrap_or_default(),
+        png: png.into_inner(),
+    })
 }
 
 fn graphics_kind(object: &PdfPageObject<'_>) -> GraphicsKind {

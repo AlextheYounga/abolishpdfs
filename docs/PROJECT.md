@@ -164,6 +164,15 @@ mixed text object. Text that the model marks for background fallback is
 intentionally not duplicated in the native layer until selective raster
 backgrounds are implemented.
 
+## Phase 4: Navigation and fallback foundations
+
+The first Phase 4 increment renders extracted page links as positioned HTML anchors. HTTP, HTTPS, `mailto`, and
+`tel` URI actions are emitted as navigable links; unsupported URI schemes remain visible in the diagnostic model
+without becoming unsafe browser navigation. Local destinations resolve to split page files, document bookmarks are
+emitted as an outline navigation tree, and pages containing non-reconstructable text receive a selectively prepared
+raster background: native text is suppressed during rendering, while fallback text and graphics remain visible.
+Background PNGs are written to `assets/` and layered beneath native HTML text and links.
+
 Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.
 Their expected feature classifications are stored in `tests/fixtures/manifest.json` and

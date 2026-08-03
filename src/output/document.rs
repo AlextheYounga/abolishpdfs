@@ -1,6 +1,9 @@
 use std::{fs, io, path::Path};
 
-use crate::model::{Color, DocumentModel, Glyph, PageModel, ReconstructionDecision, TextObject, TextRenderMode};
+use crate::model::{
+    Color, DocumentModel, Glyph, Link, LinkTarget, OutlineItem, PageModel, ReconstructionDecision, TextObject,
+    TextRenderMode,
+};
 
 const DOCUMENT_CSS: &str = r#":root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -9,6 +12,8 @@ body { padding: 24px; }
 .document { display: flex; flex-direction: column; align-items: center; gap: 24px; }
 .page { position: relative; overflow: hidden; background: white; box-shadow: 0 2px 12px #2228; }
 .text-glyph { position: absolute; white-space: pre; transform-origin: left bottom; }
+.page-background { position: absolute; inset: 0; width: 100%; height: 100%; }
+.page-link { position: absolute; z-index: 2; }
 .page-frame { border: 0; display: block; }
 "#;
 
@@ -19,14 +24,22 @@ pub struct HtmlDocument {
     pub index_html: String,
     pub document_css: String,
     pub pages: Vec<(String, String)>,
+    pub assets: Vec<(String, Vec<u8>)>,
 }
 
 impl HtmlWriter {
     pub fn render(model: &DocumentModel) -> HtmlDocument {
         let pages =
             model.pages.iter().map(|page| (format!("{}.html", page.number), render_page(page))).collect::<Vec<_>>();
-        let index_html = render_index(&model.pages);
-        HtmlDocument { index_html, document_css: DOCUMENT_CSS.to_owned(), pages }
+        let index_html = render_index(model);
+        let assets = model
+            .pages
+            .iter()
+            .filter_map(|page| {
+                page.background.as_ref().map(|background| (format!("page-{}.png", page.number), background.png.clone()))
+            })
+            .collect();
+        HtmlDocument { index_html, document_css: DOCUMENT_CSS.to_owned(), pages, assets }
     }
 
     pub fn write_to(model: &DocumentModel, output: &Path) -> Result<(), OutputError> {
@@ -38,15 +51,25 @@ impl HtmlWriter {
         for (name, page) in rendered.pages {
             fs::write(output.join("pages").join(name), page).map_err(OutputError::WriteFile)?;
         }
+        for (name, asset) in rendered.assets {
+            fs::write(output.join("assets").join(name), asset).map_err(OutputError::WriteFile)?;
+        }
         Ok(())
     }
 }
 
-fn render_index(pages: &[PageModel]) -> String {
+fn render_index(model: &DocumentModel) -> String {
     let mut html = String::from(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>PDF</title><link rel=\"stylesheet\" href=\"document.css\"></head><body><main class=\"document\">",
     );
-    for page in pages {
+    if !model.outlines.is_empty() {
+        html.push_str("<nav aria-label=\"Document outline\"><ol>");
+        for item in &model.outlines {
+            render_outline_item(&mut html, item);
+        }
+        html.push_str("</ol></nav>");
+    }
+    for page in &model.pages {
         let page_width = page.crop_box.right - page.crop_box.left;
         let page_height = page.crop_box.top - page.crop_box.bottom;
         html.push_str(&format!(
@@ -71,8 +94,14 @@ fn render_page(page: &PageModel) -> String {
         css_number(page_width),
         css_number(page_height)
     );
+    if page.background.is_some() {
+        html.push_str(&format!("<img class=\"page-background\" alt=\"\" src=\"../assets/page-{}.png\">", page.number));
+    }
     for text_object in &page.text_objects {
         render_text_object(&mut html, page, text_object);
+    }
+    for link in &page.links {
+        render_link(&mut html, page, link);
     }
     html.push_str("</section></main></body></html>");
     html
@@ -99,6 +128,61 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
             escape_html(&unicode.to_string())
         ));
     }
+}
+
+fn render_outline_item(html: &mut String, item: &OutlineItem) {
+    html.push_str("<li>");
+    if let Some(page) = item.target_page {
+        html.push_str(&format!("<a href=\"pages/{}.html\">{}</a>", page, escape_html(&item.title)));
+    } else {
+        html.push_str(&escape_html(&item.title));
+    }
+    if !item.children.is_empty() {
+        html.push_str("<ol>");
+        for child in &item.children {
+            render_outline_item(html, child);
+        }
+        html.push_str("</ol>");
+    }
+    html.push_str("</li>");
+}
+
+fn render_link(html: &mut String, page: &PageModel, link: &Link) {
+    let left = link.bounds.left - page.crop_box.left;
+    let top = page.crop_box.top - link.bounds.top;
+    let width = link.bounds.right - link.bounds.left;
+    let height = link.bounds.top - link.bounds.bottom;
+    let target = match &link.target {
+        LinkTarget::Uri(uri) if is_safe_uri(uri) => format!(" href=\"{}\"", escape_html(uri)),
+        LinkTarget::LocalDestination(page) => format!(" href=\"../pages/{}.html\"", page),
+        _ => String::new(),
+    };
+    let target_kind = link_target_kind(&link.target);
+    html.push_str(&format!(
+        "<a class=\"page-link\" aria-label=\"PDF link\" data-target=\"{}\"{} style=\"left:{}px;top:{}px;width:{}px;height:{}px\"></a>",
+        target_kind,
+        target,
+        css_number(left),
+        css_number(top),
+        css_number(width),
+        css_number(height)
+    ));
+}
+
+fn link_target_kind(target: &LinkTarget) -> &'static str {
+    match target {
+        LinkTarget::Uri(_) => "uri",
+        LinkTarget::LocalDestination(_) => "local",
+        LinkTarget::RemoteDestination => "remote",
+        LinkTarget::Unknown => "unknown",
+    }
+}
+
+fn is_safe_uri(uri: &str) -> bool {
+    let Some((scheme, _)) = uri.split_once(':') else {
+        return false;
+    };
+    matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "mailto" | "tel")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -172,7 +256,9 @@ pub enum OutputError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{AffineTransform, FallbackReason, FontCatalog, Point, ReconstructionDecision, Rect, Size};
+    use crate::model::{
+        AffineTransform, FallbackReason, FontCatalog, Point, RasterBackground, ReconstructionDecision, Rect, Size,
+    };
 
     fn model_with_text(text: &str) -> DocumentModel {
         DocumentModel {
@@ -201,8 +287,10 @@ mod tests {
                 }],
                 graphics: Vec::new(),
                 links: Vec::new(),
+                background: None,
             }],
             fonts: FontCatalog::new(),
+            outlines: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -242,15 +330,68 @@ mod tests {
     }
 
     #[test]
+    fn writer_renders_safe_uri_links_at_pdf_coordinates() {
+        let mut model = model_with_text("A");
+        model.pages[0].links.push(Link {
+            bounds: Rect { left: 36.0, bottom: 700.0, right: 144.0, top: 736.0 },
+            target: LinkTarget::Uri("https://example.com/?a=1&b=2".to_owned()),
+        });
+
+        let output = HtmlWriter::render(&model);
+
+        assert!(output.pages[0].1.contains(
+            "class=\"page-link\" aria-label=\"PDF link\" data-target=\"uri\" href=\"https://example.com/?a=1&amp;b=2\" style=\"left:36px;top:56px;width:108px;height:36px\""
+        ));
+    }
+
+    #[test]
+    fn writer_renders_local_links_and_outline_navigation() {
+        let mut model = model_with_text("A");
+        model.pages[0].links.push(Link {
+            bounds: Rect { left: 0.0, bottom: 0.0, right: 10.0, top: 10.0 },
+            target: LinkTarget::LocalDestination(2),
+        });
+        model.outlines.push(OutlineItem {
+            title: "Intro & setup".to_owned(),
+            target_page: Some(1),
+            children: Vec::new(),
+        });
+
+        let output = HtmlWriter::render(&model);
+
+        assert!(output.pages[0].1.contains("data-target=\"local\" href=\"../pages/2.html\""));
+        assert!(output.index_html.contains("href=\"pages/1.html\">Intro &amp; setup</a>"));
+    }
+
+    #[test]
+    fn writer_does_not_create_unsafe_uri_navigation() {
+        let mut model = model_with_text("A");
+        model.pages[0].links.push(Link {
+            bounds: Rect { left: 0.0, bottom: 0.0, right: 10.0, top: 10.0 },
+            target: LinkTarget::Uri("javascript:alert(1)".to_owned()),
+        });
+
+        let output = HtmlWriter::render(&model);
+
+        assert!(output.pages[0].1.contains("data-target=\"uri\" style="));
+        assert!(!output.pages[0].1.contains("href=\"javascript:"));
+    }
+
+    #[test]
     fn writer_creates_split_page_artifacts() {
         let directory = tempfile::tempdir().unwrap();
-        HtmlWriter::write_to(&model_with_text("A"), directory.path()).unwrap();
+        let mut model = model_with_text("A");
+        model.pages[0].background = Some(RasterBackground { width: 2, height: 2, png: vec![137, 80, 78, 71] });
+        HtmlWriter::write_to(&model, directory.path()).unwrap();
 
         assert!(directory.path().join("index.html").is_file());
         assert!(directory.path().join("document.css").is_file());
         assert!(directory.path().join("pages/1.html").is_file());
+        assert!(directory.path().join("assets/page-1.png").is_file());
         assert!(directory.path().join("assets").is_dir());
         let index = fs::read_to_string(directory.path().join("index.html")).unwrap();
         assert!(index.contains("class=\"page-frame\""));
+        let page = fs::read_to_string(directory.path().join("pages/1.html")).unwrap();
+        assert!(page.contains("class=\"page-background\""));
     }
 }
