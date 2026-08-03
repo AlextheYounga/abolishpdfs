@@ -173,6 +173,13 @@ emitted as an outline navigation tree, and pages containing non-reconstructable 
 raster background: native text is suppressed during rendering, while fallback text and graphics remain visible.
 Background PNGs are written to `assets/` and layered beneath native HTML text and links.
 
+## Phase 5: Graphics fidelity
+
+Page paths, images, shadings, forms, and unsupported PDFium objects are now retained in the owned model with paint
+order, bounds, activity, and recursive form children. Pages containing graphics are rendered into a PNG background
+so vector and image content remains visually faithful while reconstructed text, links, and document navigation stay
+browser-native overlays. Pages without graphics continue to avoid unnecessary raster assets.
+
 Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.
 Their expected feature classifications are stored in `tests/fixtures/manifest.json` and

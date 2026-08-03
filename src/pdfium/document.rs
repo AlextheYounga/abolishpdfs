@@ -14,6 +14,9 @@ use crate::model::{
 };
 
 use super::PdfiumLibrary;
+#[cfg(test)]
+#[path = "document_tests.rs"]
+mod tests;
 
 pub struct DocumentExtractor;
 
@@ -91,10 +94,8 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         context.fallback_paint_orders
     };
 
-    let background = if fallback_paint_orders.is_empty() {
-        None
-    } else {
-        match render_fallback_background(page, &fallback_paint_orders) {
+    let background = if needs_raster_background(&fallback_paint_orders, &graphics) {
+        match render_page_background(page, &fallback_paint_orders) {
             Ok(background) => Some(background),
             Err(error) => {
                 model.diagnostics.push(DocumentDiagnostic {
@@ -104,6 +105,8 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
                 None
             }
         }
+    } else {
+        None
     };
 
     let links = page
@@ -113,6 +116,10 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         .collect();
 
     PageModel { number: index + 1, size: Size { width, height }, crop_box, text_objects, graphics, links, background }
+}
+
+fn needs_raster_background(fallback_paint_orders: &[usize], graphics: &[GraphicsObject]) -> bool {
+    !fallback_paint_orders.is_empty() || !graphics.is_empty()
 }
 
 struct ExtractionContext<'a, 'b> {
@@ -288,7 +295,7 @@ fn outline_item(bookmark: &PdfBookmark<'_>) -> OutlineItem {
     OutlineItem { title: bookmark.title().unwrap_or_else(|| "Untitled".to_owned()), target_page, children }
 }
 
-fn render_fallback_background(
+fn render_page_background(
     page: &PdfPage<'_>,
     fallback_paint_orders: &[usize],
 ) -> Result<RasterBackground, PdfiumError> {
