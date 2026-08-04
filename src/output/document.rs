@@ -4,6 +4,7 @@ use crate::model::{
     Color, DocumentModel, FontCatalog, Glyph, Link, LinkTarget, OutlineItem, PageModel, ReconstructionDecision,
     TextObject, TextRenderMode,
 };
+use crate::text::projection::{self, css_number};
 
 const DOCUMENT_CSS: &str = r#":root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -130,18 +131,43 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
         let Some(unicode) = glyph.unicode else {
             continue;
         };
-        let placement = placement(page, glyph);
         let fill = glyph.fill.unwrap_or(Color::BLACK);
         let font_family =
             glyph.font.and_then(|id| fonts.fonts.get(&id).and_then(|font| font.data.as_ref()).map(|_| id));
+        let position = match glyph.transform.as_ref() {
+            Some(matrix) if !projection::is_identity(matrix) => {
+                let projection = projection::project(matrix).unwrap_or_else(|| projection::Projection {
+                    scale: 1.0,
+                    a: matrix.a,
+                    b: matrix.b,
+                    c: matrix.c,
+                    d: matrix.d,
+                });
+                format!(
+                    "left:{}px;bottom:{}px;{}",
+                    css_number(glyph.origin.x - page.crop_box.left),
+                    css_number(glyph.origin.y - page.crop_box.bottom),
+                    projection.to_css()
+                )
+            }
+            Some(_) => format!(
+                "left:{}px;top:{}px;transform:matrix(1,0,0,1,0,0);",
+                css_number(placement(page, glyph).left),
+                css_number(placement(page, glyph).top)
+            ),
+            None => format!(
+                "left:{}px;top:{}px;",
+                css_number(placement(page, glyph).left),
+                css_number(placement(page, glyph).top)
+            ),
+        };
+        let family = font_family.map_or_else(|| "sans-serif".to_owned(), |id| format!("'pdf-font-{id}',sans-serif"));
         html.push_str(&format!(
-            "<span class=\"text-glyph\" data-source=\"{}\" style=\"left:{}px;top:{}px;font-size:{}px;color:{};{}\">{}</span>",
+            "<span class=\"text-glyph\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};{}\">{}</span>",
             text_object.source,
-            css_number(placement.left),
-            css_number(placement.top),
             css_number(glyph.font_size),
             css_color(fill),
-            render_mode_style(text_object.render_mode, glyph, font_family),
+            render_mode_style(text_object.render_mode, glyph),
             escape_html(&unicode.to_string())
         ));
     }
@@ -216,27 +242,12 @@ fn placement(page: &PageModel, glyph: &Glyph) -> Placement {
     Placement { left, top }
 }
 
-fn render_mode_style(mode: TextRenderMode, glyph: &Glyph, font_family: Option<usize>) -> String {
-    let family = font_family.map_or_else(|| "sans-serif".to_owned(), |id| format!("'pdf-font-{id}',sans-serif"));
-    let transform = glyph
-        .transform
-        .map(|matrix| {
-            format!(
-                "transform:matrix({},{},{},{},0,0);",
-                css_number(matrix.a),
-                css_number(matrix.b),
-                css_number(matrix.c),
-                css_number(matrix.d)
-            )
-        })
-        .unwrap_or_default();
+fn render_mode_style(mode: TextRenderMode, glyph: &Glyph) -> String {
     match mode {
-        TextRenderMode::Stroke | TextRenderMode::FillStroke => format!(
-            "font-family:{family};{}{}",
-            transform,
+        TextRenderMode::Stroke | TextRenderMode::FillStroke => {
             glyph.stroke.map(|color| format!("-webkit-text-stroke:1px {};", css_color(color))).unwrap_or_default()
-        ),
-        _ => format!("font-family:{family};{transform}"),
+        }
+        _ => String::new(),
     }
 }
 
@@ -253,10 +264,6 @@ fn font_extension(data: &[u8]) -> &'static str {
 
 fn css_color(color: Color) -> String {
     format!("rgba({}, {}, {}, {:.4})", color.red, color.green, color.blue, color.alpha as f32 / 255.0)
-}
-
-fn css_number(value: f32) -> String {
-    format!("{value:.4}").trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 fn escape_html(value: &str) -> String {

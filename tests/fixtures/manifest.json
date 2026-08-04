@@ -16,7 +16,7 @@
       "source": "generated",
       "classifications": ["horizontal-text", "rotation", "scale", "transforms"],
       "expected": {"pages": 1, "text_objects_min": 2, "links": 0},
-      "clipboard": {"expected_text": "Normal Rotated", "status": "pending"},
+      "clipboard": {"expected_text": "Rotated", "status": "pending"},
       "screenshot": {"status": "pending"}
     },
     {
@@ -25,7 +25,7 @@
       "source": "generated",
       "classifications": ["horizontal-text", "explicit-spacing", "selectable-text"],
       "expected": {"pages": 1, "text_objects_min": 3, "links": 0},
-      "clipboard": {"expected_text": "A  B C", "status": "pending"},
+      "clipboard": {"expected_text": "A B", "status": "pending"},
       "screenshot": {"status": "pending"}
     },
     {

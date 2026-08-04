@@ -164,6 +164,16 @@ mixed text object. Text that the model marks for background fallback is
 intentionally not duplicated in the native layer until selective raster
 backgrounds are implemented.
 
+Text objects whose matrix is a pure translation use each glyph's measured
+bounds as the CSS box (`left`/`top`), which is exact for horizontal text. Text
+objects carrying rotation, skew, or anisotropic scale are projected the way
+pdf2htmlEX does in `HTMLRenderer/state.cc`: the vertical scale is absorbed into
+`font-size` (computed from the unscaled `Tf` size times `hypot(c, d)`), the
+remaining matrix is y-flipped into a `transform:matrix(...)` with zero
+translation, and the glyph baseline anchors the box through `left`/`bottom`
+with `transform-origin: 0 100%`. This keeps rotated and mirrored runs visible
+and correctly oriented without double-applying the matrix translation.
+
 ## Phase 4: Navigation and fallback foundations
 
 The first Phase 4 increment renders extracted page links as positioned HTML anchors. HTTP, HTTPS, `mailto`, and

@@ -8,6 +8,7 @@ use crate::model::{
     FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel, Point,
     ReconstructionDecision, Rect, Size, TextObject, TextRenderMode,
 };
+use crate::text::projection;
 
 use super::PdfiumLibrary;
 use super::background::render_page_background;
@@ -174,9 +175,16 @@ fn extract_object(
         let font = object_glyphs.first().and_then(|glyph| glyph.font).unwrap_or_else(|| first_font_id(context.model));
         let render_mode = text_render_mode(text.render_mode());
         let object_transform = text.matrix().ok().map(affine_transform);
+        let font_size_scale = object_transform
+            .as_ref()
+            .and_then(projection::project)
+            .map(|projection| projection.scale)
+            .filter(|scale| scale.is_finite() && *scale > projection::EPSILON)
+            .unwrap_or(1.0);
         let mut object_glyphs = object_glyphs;
         for glyph in &mut object_glyphs {
             glyph.transform = object_transform;
+            glyph.font_size *= font_size_scale;
         }
         let reconstruction = reconstruction_decision(&object_glyphs, font, render_mode, context.model);
         context.text_objects.push(TextObject {
@@ -223,7 +231,7 @@ fn extract_glyph(character: &PdfPageTextChar<'_>, context: &mut ExtractionContex
         tight_bounds: character.tight_bounds().ok().map(rect),
         loose_bounds: character.loose_bounds().ok().map(rect),
         transform: None,
-        font_size: character.scaled_font_size().value,
+        font_size: character.unscaled_font_size().value,
         fill: character.fill_color().ok().map(color),
         stroke: character.stroke_color().ok().map(color),
         generated_by_pdfium: character.is_generated().ok(),

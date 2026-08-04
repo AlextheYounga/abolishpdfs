@@ -67,6 +67,28 @@ fn writer_does_not_apply_transform_translation_twice() {
 }
 
 #[test]
+fn writer_rotates_and_sizes_transformed_text_on_baseline() {
+    let mut model = model_with_text("R");
+    model.pages[0].text_objects[0].glyphs[0].font_size = 24.0;
+    model.pages[0].text_objects[0].glyphs[0].origin = Point { x: 220.0, y: 420.0 };
+    model.pages[0].text_objects[0].glyphs[0].transform =
+        Some(AffineTransform { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: 220.0, f: 420.0 });
+    let output = HtmlWriter::render(&model);
+    let page = &output.pages[0].1;
+    assert!(
+        page.contains("left:220px;bottom:420px;transform:matrix(0,-1,1,0,0,0);font-family:sans-serif;font-size:24px")
+    );
+}
+
+#[test]
+fn writer_emits_axis_aligned_glyph_without_transform_matrix() {
+    let output = HtmlWriter::render(&model_with_text("A"));
+    let page = &output.pages[0].1;
+    assert!(page.contains("left:72px;top:68px;font-family:sans-serif;font-size:12px"));
+    assert!(!page.contains("transform:matrix"));
+}
+
+#[test]
 fn fallback_text_is_not_emitted_as_native_text() {
     let mut model = model_with_text("A");
     model.pages[0].text_objects[0].reconstruction =
