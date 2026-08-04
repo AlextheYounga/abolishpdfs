@@ -1,3 +1,4 @@
+mod background;
 mod document;
 mod library;
 mod probe;
