@@ -6,54 +6,66 @@
       "path": "generated/basic-horizontal.pdf",
       "source": "generated",
       "classifications": ["horizontal-text", "system-font", "selectable-text"],
-      "expected": {"pages": 1, "text_objects_min": 1, "links": 0},
-      "clipboard": {"expected_text": "Hello, PDFium!", "status": "pending"},
-      "screenshot": {"status": "pending"}
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0, "native_text": ["Hello, PDFium!"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "Hello, PDFium!", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": []},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
       "id": "transforms",
       "path": "generated/transforms.pdf",
       "source": "generated",
       "classifications": ["horizontal-text", "rotation", "scale", "transforms"],
-      "expected": {"pages": 1, "text_objects_min": 2, "links": 0},
-      "clipboard": {"expected_text": "Rotated", "status": "pending"},
-      "screenshot": {"status": "pending"}
+      "expected": {"pages": 1, "text_objects_min": 2, "links": 0, "native_text": ["Normal", "Rotated"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "Rotated", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": []},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
       "id": "spacing",
       "path": "generated/spacing.pdf",
       "source": "generated",
       "classifications": ["horizontal-text", "explicit-spacing", "selectable-text"],
-      "expected": {"pages": 1, "text_objects_min": 3, "links": 0},
-      "clipboard": {"expected_text": "A B", "status": "pending"},
-      "screenshot": {"status": "pending"}
+      "expected": {"pages": 1, "text_objects_min": 3, "links": 0, "native_text": ["A", "B", "C", "wide"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "A B", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": []},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
       "id": "page-boxes",
       "path": "generated/page-boxes.pdf",
       "source": "generated",
       "classifications": ["page-size", "crop-box"],
-      "expected": {"pages": 2, "text_objects_min": 2, "links": 0},
-      "clipboard": {"expected_text": "Crop box page", "status": "pending"},
-      "screenshot": {"status": "pending"}
+      "expected": {"pages": 2, "text_objects_min": 2, "links": 0, "native_text": ["Crop box page", "Second page"], "page_sizes": [{"width": 500, "height": 700}, {"width": 400, "height": 400}], "fallback": "none"},
+      "clipboard": {"expected_text": "Crop box page", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": ["#page-1", "#page-2"]},
+      "assets": {"required": []},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
       "id": "links",
       "path": "generated/links.pdf",
       "source": "generated",
       "classifications": ["uri-link", "link-rectangle", "selectable-text"],
-      "expected": {"pages": 1, "text_objects_min": 1, "links": 1},
-      "clipboard": {"expected_text": "Open example", "status": "pending"},
-      "screenshot": {"status": "pending"}
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 1, "native_text": ["Open example"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "Open example", "status": "required"},
+      "navigation": {"hrefs": ["https://example.com/"], "fragments": []},
+      "assets": {"required": []},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
       "id": "clipping-transparency",
       "path": "generated/clipping-transparency.pdf",
       "source": "generated",
       "classifications": ["clipping", "transparency", "background-graphics"],
-      "expected": {"pages": 1, "text_objects_min": 1, "links": 0},
-      "clipboard": {"expected_text": "Clipped text", "status": "pending"},
-      "screenshot": {"status": "pending"}
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0, "native_text": ["Clipped text"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "background"},
+      "clipboard": {"expected_text": "Clipped text", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": ["page-1.png"]},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     }
   ],
   "external_corpus": [
