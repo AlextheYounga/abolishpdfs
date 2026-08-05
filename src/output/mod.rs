@@ -1,3 +1,3 @@
 mod document;
 
-pub use document::{HtmlDocument, HtmlWriter, OutputError};
+pub use document::{HtmlDocument, HtmlWriter, OutputError, TextIntegrityError};

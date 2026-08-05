@@ -10,4 +10,4 @@ pub use font::{FontCatalog, FontId, FontSource};
 pub use geometry::{AffineTransform, Color, Point, Rect, Size};
 pub use navigation::{Link, LinkTarget, OutlineItem};
 pub use page::{GraphicsKind, GraphicsObject, PageModel, RasterBackground};
-pub use text::{FallbackReason, Glyph, ReconstructionDecision, TextObject, TextRenderMode};
+pub use text::{Glyph, ReconstructionDecision, TextFailureReason, TextIntegrityFailure, TextObject, TextRenderMode};

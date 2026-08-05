@@ -1,8 +1,8 @@
-use std::{fs, io, path::Path};
+use std::{fmt, fs, io, path::Path};
 
 use crate::model::{
     Color, DocumentModel, FontCatalog, Glyph, Link, LinkTarget, OutlineItem, PageModel, ReconstructionDecision,
-    TextObject, TextRenderMode,
+    TextIntegrityFailure, TextObject, TextRenderMode,
 };
 use crate::text::projection::{self, css_number};
 
@@ -56,6 +56,10 @@ impl HtmlWriter {
     }
 
     pub fn write_to(model: &DocumentModel, output: &Path) -> Result<(), OutputError> {
+        let failures = model.discovered_text_failures();
+        if !failures.is_empty() {
+            return Err(OutputError::TextIntegrity(TextIntegrityError { failures }));
+        }
         let rendered = Self::render(model);
         fs::create_dir_all(output.join("assets")).map_err(OutputError::CreateDirectory)?;
         fs::write(output.join("index.html"), rendered.index_html).map_err(OutputError::WriteFile)?;
@@ -269,10 +273,31 @@ fn escape_html(value: &str) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum OutputError {
+    #[error("{0}")]
+    TextIntegrity(TextIntegrityError),
     #[error("could not create output directory: {0}")]
     CreateDirectory(io::Error),
     #[error("could not write output file: {0}")]
     WriteFile(io::Error),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextIntegrityError {
+    pub failures: Vec<TextIntegrityFailure>,
+}
+
+impl fmt::Display for TextIntegrityError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "native text conversion failed")?;
+        for failure in &self.failures {
+            write!(
+                formatter,
+                "; page {} object {}: {:?} (semantic text available: {})",
+                failure.page, failure.paint_order, failure.reason, failure.semantic_text_available
+            )?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
