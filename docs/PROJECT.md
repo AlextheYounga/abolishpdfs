@@ -199,11 +199,29 @@ geometry is not proven safe for native reconstruction.
 
 Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.
-Their expected feature classifications are stored in `tests/fixtures/manifest.json` and
-validated by `cargo test --test corpus_manifest`. Diagnostic classification is
-available through `tools/corpus.py`; optional Playwright screenshot and copied
-text checks are provided by `tools/browser_corpus.py`. Licensed upstream PDFs
-remain pending until provenance and redistribution terms are recorded.
+Their expected feature classifications and browser observations are stored in
+`tests/fixtures/manifest.json` and validated by `cargo test --test corpus_manifest`.
+
+The repeatable corpus gate is:
+
+```text
+python3 tools/generate_corpus.py
+cargo test --test corpus_manifest
+python3 tools/corpus.py validate
+python3 tools/corpus.py run --binary target/debug/abolishpdfs --pdfium /path/to/libpdfium.so
+python3 tools/browser_corpus.py /path/to/generated-output
+```
+
+The diagnostic command emits structured JSON and fails when page count, crop-box
+geometry, object/link counts, or the recorded fallback decision differs. The browser
+command checks native DOM text, copied text, page order, page fragments, URI links,
+required assets, and one screenshot per fixture. Screenshots are written to the
+requested directory and are capture-only until a manifest entry records a baseline.
+For comparison entries, `max_diff_ratio` and `max_diff_pixels` are perceptual
+tolerances rather than byte equality; Pillow is required for those comparisons.
+Generated screenshots and diagnostic output should be kept outside tracked source.
+Licensed upstream PDFs remain pending until provenance and redistribution terms are
+recorded.
 
 ## Links
 - [pdf2htmlex](https://github.com/pdf2htmlex/pdf2htmlex)
