@@ -42,6 +42,16 @@ pub struct FontSource {
     pub data: Option<Vec<u8>>,
     pub used_unicode: Vec<char>,
     pub mapping_proven: bool,
+    pub processed: Option<ProcessedFont>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProcessedFont {
+    pub asset_name: String,
+    pub family_name: String,
+    pub data: Vec<u8>,
+    pub glyph_count: usize,
+    pub advance_widths: Vec<u16>,
 }
 
 #[cfg(test)]
@@ -57,6 +67,7 @@ mod tests {
             data: Some(vec![1, 2, 3]),
             used_unicode: vec!['A'],
             mapping_proven: false,
+            processed: None,
         };
         let first = catalog.insert_or_get(source.clone());
         let second = catalog.insert_or_get(source);

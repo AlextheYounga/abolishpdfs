@@ -12,6 +12,10 @@ pub struct Cli {
     #[arg(long, env = "ABOLISHPDFS_PDFIUM_PATH", value_name = "PATH")]
     pub pdfium_path: Option<PathBuf>,
 
+    /// FontForge executable. Overrides ABOLISHPDFS_FONTFORGE_PATH.
+    #[arg(long, env = "ABOLISHPDFS_FONTFORGE_PATH", default_value = "fontforge", value_name = "PATH")]
+    pub fontforge_path: PathBuf,
+
     /// Inspect PDFium's text and page-object capabilities without writing HTML.
     #[arg(long)]
     pub probe: bool,

@@ -2,8 +2,8 @@ use std::fs;
 
 use super::*;
 use crate::model::{
-    AffineTransform, FallbackReason, FontCatalog, FontSource, Point, RasterBackground, ReconstructionDecision, Rect,
-    Size,
+    AffineTransform, FallbackReason, FontCatalog, FontSource, Point, ProcessedFont, RasterBackground,
+    ReconstructionDecision, Rect, Size,
 };
 
 fn model_with_text(text: &str) -> DocumentModel {
@@ -133,10 +133,17 @@ fn writer_embeds_fonts_and_assigns_native_glyphs() {
         data: Some(vec![0, 1, 0, 0, 1]),
         used_unicode: vec!['A'],
         mapping_proven: true,
+        processed: Some(ProcessedFont {
+            asset_name: "font-0.woff2".to_owned(),
+            family_name: "pdf-font-0".to_owned(),
+            data: vec![119, 79, 70, 50, 1],
+            glyph_count: 2,
+            advance_widths: vec![600, 600],
+        }),
     });
     let output = HtmlWriter::render(&model);
-    assert!(output.document_css.contains("@font-face{font-family:'pdf-font-0';src:url('assets/font-0.ttf');}"));
-    assert!(output.assets.contains(&("font-0.ttf".to_owned(), vec![0, 1, 0, 0, 1])));
+    assert!(output.document_css.contains("@font-face{font-family:'pdf-font-0';src:url('assets/font-0.woff2');}"));
+    assert!(output.assets.contains(&("font-0.woff2".to_owned(), vec![119, 79, 70, 50, 1])));
     assert!(output.index_html.contains("font-family:'pdf-font-0',sans-serif"));
 }
 

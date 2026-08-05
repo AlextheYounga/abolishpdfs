@@ -67,6 +67,7 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
             data: font.data().ok(),
             used_unicode: Vec::new(),
             mapping_proven: false,
+            processed: None,
         });
         font_ids.insert(font.name(), id);
     }
