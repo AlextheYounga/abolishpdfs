@@ -70,6 +70,11 @@ PDFium is not expected to expose every internal event Poppler exposed through `O
 
 FontForge is the primary font-processing backend for the initial implementation.
 
+The headless `fontforge` executable must be available on `PATH`, or configured with
+`--fontforge-path` / `ABOLISHPDFS_FONTFORGE_PATH`. The pipeline invokes one isolated
+job per embedded TrueType or OpenType font and emits deterministic WOFF2 assets;
+fonts that cannot be processed remain on the documented raster fallback path.
+
 It will handle:
 
 * Embedded TrueType fonts

@@ -41,16 +41,15 @@ impl HtmlWriter {
             })
             .collect::<Vec<_>>();
         let mut font_css = String::new();
-        for (id, font) in &model.fonts.fonts {
-            let Some(data) = font.data.as_ref() else {
+        for font in model.fonts.fonts.values() {
+            let Some(processed) = font.processed.as_ref() else {
                 continue;
             };
-            let extension = font_extension(data);
             font_css.push_str(&format!(
-                "@font-face{{font-family:'pdf-font-{}';src:url('assets/font-{}.{}');}}\n",
-                id, id, extension
+                "@font-face{{font-family:'{}';src:url('assets/{}');}}\n",
+                processed.family_name, processed.asset_name
             ));
-            assets.push((format!("font-{}.{}", id, extension), data.clone()));
+            assets.push((processed.asset_name.clone(), processed.data.clone()));
         }
         HtmlDocument { index_html, document_css: format!("{font_css}{DOCUMENT_CSS}"), assets }
     }
@@ -119,7 +118,7 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
         };
         let fill = glyph.fill.unwrap_or(Color::BLACK);
         let font_family =
-            glyph.font.and_then(|id| fonts.fonts.get(&id).and_then(|font| font.data.as_ref()).map(|_| id));
+            glyph.font.and_then(|id| fonts.fonts.get(&id).and_then(|font| font.processed.as_ref()).map(|_| id));
         let position = match glyph.transform.as_ref() {
             Some(matrix) if !projection::is_identity(matrix) => {
                 let projection = projection::project(matrix).unwrap_or_else(|| projection::Projection {
@@ -147,7 +146,10 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
                 css_number(placement(page, glyph).top)
             ),
         };
-        let family = font_family.map_or_else(|| "sans-serif".to_owned(), |id| format!("'pdf-font-{id}',sans-serif"));
+        let family = font_family
+            .and_then(|id| fonts.fonts.get(&id))
+            .and_then(|font| font.processed.as_ref())
+            .map_or_else(|| "sans-serif".to_owned(), |font| format!("'{}',sans-serif", font.family_name));
         html.push_str(&format!(
             "<span class=\"text-glyph\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};{}\">{}</span>",
             text_object.source,
@@ -234,17 +236,6 @@ fn render_mode_style(mode: TextRenderMode, glyph: &Glyph) -> String {
             glyph.stroke.map(|color| format!("-webkit-text-stroke:1px {};", css_color(color))).unwrap_or_default()
         }
         _ => String::new(),
-    }
-}
-
-fn font_extension(data: &[u8]) -> &'static str {
-    match data.get(..4) {
-        Some([0, 1, 0, 0]) => "ttf",
-        Some([b'O', b'T', b'T', b'O']) => "otf",
-        Some([b't', b't', b'c', b'f']) => "ttc",
-        Some([b'w', b'O', b'F', b'F']) => "woff",
-        Some([b'w', b'O', b'F', b'2']) => "woff2",
-        _ => "bin",
     }
 }
 

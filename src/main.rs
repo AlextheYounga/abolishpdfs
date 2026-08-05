@@ -2,6 +2,7 @@ use std::{env, process::ExitCode};
 
 use abolishpdfs::{
     cli::Cli,
+    fonts::{FontForgeWorker, WorkerConfig},
     output::HtmlWriter,
     pdfium::{CapabilityProbe, DocumentExtractor, PdfiumLibrary},
 };
@@ -49,16 +50,19 @@ fn main() -> ExitCode {
                 }
             } else {
                 match DocumentExtractor::extract(&cli.input, &library) {
-                    Ok(model) => match HtmlWriter::write_to(&model, &cli.output) {
-                        Ok(()) => {
-                            println!("Wrote HTML output to {}", cli.output.display());
-                            ExitCode::SUCCESS
+                    Ok(mut model) => {
+                        model.prepare_fonts(&FontForgeWorker::new(WorkerConfig::new(cli.fontforge_path)));
+                        match HtmlWriter::write_to(&model, &cli.output) {
+                            Ok(()) => {
+                                println!("Wrote HTML output to {}", cli.output.display());
+                                ExitCode::SUCCESS
+                            }
+                            Err(error) => {
+                                eprintln!("HTML output failed: {error}");
+                                ExitCode::FAILURE
+                            }
                         }
-                        Err(error) => {
-                            eprintln!("HTML output failed: {error}");
-                            ExitCode::FAILURE
-                        }
-                    },
+                    }
                     Err(error) => {
                         eprintln!("Document extraction failed: {error}");
                         ExitCode::FAILURE
