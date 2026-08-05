@@ -26,11 +26,11 @@ def main():
         browser = playwright.chromium.launch()
         context = browser.new_context(permissions=["clipboard-read", "clipboard-write"])
         for fixture in manifest["fixtures"]:
-            page_file = args.output / fixture["id"] / "pages" / "1.html"
+            page_file = args.output / fixture["id"] / "index.html"
             page = context.new_page()
             page.goto(page_file.resolve().as_uri())
             screenshot = args.screenshots / f"{fixture['id']}-page-1.png"
-            page.screenshot(path=str(screenshot), full_page=True)
+            page.locator(".page").first.screenshot(path=str(screenshot))
             page.keyboard.press("ControlOrMeta+A")
             page.keyboard.press("ControlOrMeta+C")
             copied = page.evaluate("navigator.clipboard.readText()")

@@ -20,7 +20,7 @@ pub struct Cli {
     #[arg(long)]
     pub diagnostic: bool,
 
-    /// Directory receiving split-page HTML output.
+    /// Directory receiving the HTML document and assets.
     #[arg(long, default_value = "output", value_name = "DIR")]
     pub output: PathBuf,
 }

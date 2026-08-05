@@ -156,13 +156,13 @@ Milestone 3 writes the first HTML artifact set from that model:
 abolishpdfs --pdfium-path /path/to/libpdfium.so --output output document.pdf
 ```
 
-The writer produces `index.html`, `document.css`, and split page files under
-`pages/`. The index displays the split pages, while each page uses its crop box
-as the CSS viewport origin. Native text is emitted per glyph so geometry, color,
-stroke, and transforms do not incorrectly inherit from the first glyph in a
-mixed text object. Text that the model marks for background fallback is
-intentionally not duplicated in the native layer until selective raster
-backgrounds are implemented.
+The writer produces one `index.html` document, `document.css`, and assets under
+`assets/`. Every page is emitted inline as a `.page` section in document order,
+with its crop box as the CSS viewport origin. Native text is emitted per glyph
+so geometry, color, stroke, and transforms do not incorrectly inherit from the
+first glyph in a mixed text object. Text that the model marks for background
+fallback is intentionally not duplicated in the native layer until selective
+raster backgrounds are implemented.
 
 Text objects whose matrix is a pure translation use each glyph's measured
 bounds as the CSS box (`left`/`top`), which is exact for horizontal text. Text
@@ -178,7 +178,7 @@ and correctly oriented without double-applying the matrix translation.
 
 The first Phase 4 increment renders extracted page links as positioned HTML anchors. HTTP, HTTPS, `mailto`, and
 `tel` URI actions are emitted as navigable links; unsupported URI schemes remain visible in the diagnostic model
-without becoming unsafe browser navigation. Local destinations resolve to split page files, document bookmarks are
+without becoming unsafe browser navigation. Local destinations resolve to page fragments in the single document, document bookmarks are
 emitted as an outline navigation tree, and pages containing non-reconstructable text receive a selectively prepared
 raster background: native text is suppressed during rendering, while fallback text and graphics remain visible.
 Background PNGs are written to `assets/` and layered beneath native HTML text and links.

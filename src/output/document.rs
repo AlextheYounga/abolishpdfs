@@ -12,10 +12,13 @@ html, body { margin: 0; padding: 0; background: #666; }
 body { padding: 24px; }
 .document { display: flex; flex-direction: column; align-items: center; gap: 24px; }
 .page { position: relative; overflow: hidden; background: white; box-shadow: 0 2px 12px #2228; }
+.page-content { position: absolute; inset: 0; overflow: hidden; transform-origin: 0 0; }
 .text-glyph { position: absolute; white-space: pre; transform-origin: left bottom; }
 .page-background { position: absolute; inset: 0; width: 100%; height: 100%; }
 .page-link { position: absolute; z-index: 2; }
-.page-frame { border: 0; display: block; }
+@media print {
+  .page { break-after: page; break-inside: avoid; box-shadow: none; }
+}
 "#;
 
 pub struct HtmlWriter;
@@ -24,17 +27,11 @@ pub struct HtmlWriter;
 pub struct HtmlDocument {
     pub index_html: String,
     pub document_css: String,
-    pub pages: Vec<(String, String)>,
     pub assets: Vec<(String, Vec<u8>)>,
 }
 
 impl HtmlWriter {
     pub fn render(model: &DocumentModel) -> HtmlDocument {
-        let pages = model
-            .pages
-            .iter()
-            .map(|page| (format!("{}.html", page.number), render_page(page, &model.fonts)))
-            .collect::<Vec<_>>();
         let index_html = render_index(model);
         let mut assets = model
             .pages
@@ -55,18 +52,14 @@ impl HtmlWriter {
             ));
             assets.push((format!("font-{}.{}", id, extension), data.clone()));
         }
-        HtmlDocument { index_html, document_css: format!("{font_css}{DOCUMENT_CSS}"), pages, assets }
+        HtmlDocument { index_html, document_css: format!("{font_css}{DOCUMENT_CSS}"), assets }
     }
 
     pub fn write_to(model: &DocumentModel, output: &Path) -> Result<(), OutputError> {
         let rendered = Self::render(model);
-        fs::create_dir_all(output.join("pages")).map_err(OutputError::CreateDirectory)?;
         fs::create_dir_all(output.join("assets")).map_err(OutputError::CreateDirectory)?;
         fs::write(output.join("index.html"), rendered.index_html).map_err(OutputError::WriteFile)?;
         fs::write(output.join("document.css"), rendered.document_css).map_err(OutputError::WriteFile)?;
-        for (name, page) in rendered.pages {
-            fs::write(output.join("pages").join(name), page).map_err(OutputError::WriteFile)?;
-        }
         for (name, asset) in rendered.assets {
             fs::write(output.join("assets").join(name), asset).map_err(OutputError::WriteFile)?;
         }
@@ -76,7 +69,7 @@ impl HtmlWriter {
 
 fn render_index(model: &DocumentModel) -> String {
     let mut html = String::from(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>PDF</title><link rel=\"stylesheet\" href=\"document.css\"></head><body><main class=\"document\">",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>PDF</title><link rel=\"stylesheet\" href=\"document.css\"></head><body>",
     );
     if !model.outlines.is_empty() {
         html.push_str("<nav aria-label=\"Document outline\"><ol>");
@@ -85,42 +78,35 @@ fn render_index(model: &DocumentModel) -> String {
         }
         html.push_str("</ol></nav>");
     }
+    html.push_str("<main id=\"page-container\" class=\"document\">");
     for page in &model.pages {
-        let page_width = page.crop_box.right - page.crop_box.left;
-        let page_height = page.crop_box.top - page.crop_box.bottom;
-        html.push_str(&format!(
-            "<iframe class=\"page-frame\" title=\"Page {}\" src=\"pages/{}.html\" style=\"width:{}px;height:{}px\"></iframe>",
-            page.number,
-            page.number,
-            css_number(page_width),
-            css_number(page_height)
-        ));
+        render_page(&mut html, page, &model.fonts);
     }
     html.push_str("</main></body></html>");
     html
 }
 
-fn render_page(page: &PageModel, fonts: &FontCatalog) -> String {
+fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog) {
     let page_width = page.crop_box.right - page.crop_box.left;
     let page_height = page.crop_box.top - page.crop_box.bottom;
-    let mut html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Page {}</title><link rel=\"stylesheet\" href=\"../document.css\"></head><body><main class=\"document\"><section class=\"page\" aria-label=\"Page {}\" style=\"width:{}px;height:{}px\">",
+    html.push_str(&format!(
+        "<section id=\"page-{}\" class=\"page\" data-page-no=\"{}\" aria-label=\"Page {}\" style=\"width:{}px;height:{}px\"><div class=\"page-content\">",
+        page.number,
         page.number,
         page.number,
         css_number(page_width),
         css_number(page_height)
-    );
+    ));
     if page.background.is_some() {
-        html.push_str(&format!("<img class=\"page-background\" alt=\"\" src=\"../assets/page-{}.png\">", page.number));
+        html.push_str(&format!("<img class=\"page-background\" alt=\"\" src=\"assets/page-{}.png\">", page.number));
     }
     for text_object in &page.text_objects {
-        render_text_object(&mut html, page, text_object, fonts);
+        render_text_object(html, page, text_object, fonts);
     }
     for link in &page.links {
-        render_link(&mut html, page, link);
+        render_link(html, page, link);
     }
-    html.push_str("</section></main></body></html>");
-    html
+    html.push_str("</div></section>");
 }
 
 fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObject, fonts: &FontCatalog) {
@@ -176,7 +162,7 @@ fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObj
 fn render_outline_item(html: &mut String, item: &OutlineItem) {
     html.push_str("<li>");
     if let Some(page) = item.target_page {
-        html.push_str(&format!("<a href=\"pages/{}.html\">{}</a>", page, escape_html(&item.title)));
+        html.push_str(&format!("<a href=\"#page-{}\">{}</a>", page, escape_html(&item.title)));
     } else {
         html.push_str(&escape_html(&item.title));
     }
@@ -197,7 +183,7 @@ fn render_link(html: &mut String, page: &PageModel, link: &Link) {
     let height = link.bounds.top - link.bounds.bottom;
     let target = match &link.target {
         LinkTarget::Uri(uri) if is_safe_uri(uri) => format!(" href=\"{}\"", escape_html(uri)),
-        LinkTarget::LocalDestination(page) => format!(" href=\"../pages/{}.html\"", page),
+        LinkTarget::LocalDestination(page) => format!(" href=\"#page-{}\"", page),
         _ => String::new(),
     };
     let target_kind = link_target_kind(&link.target);
