@@ -39,11 +39,11 @@ pub enum TextRenderMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ReconstructionDecision {
     NativeText,
-    Background(FallbackReason),
+    TextFailure(TextFailureReason),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum FallbackReason {
+pub enum TextFailureReason {
     MissingUnicode,
     UnprovenFontMapping,
     MissingGeometry,
@@ -51,14 +51,22 @@ pub enum FallbackReason {
     ExtractionError,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TextIntegrityFailure {
+    pub page: usize,
+    pub paint_order: usize,
+    pub reason: TextFailureReason,
+    pub semantic_text_available: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn missing_unicode_requires_background_fallback() {
-        let decision = ReconstructionDecision::Background(FallbackReason::MissingUnicode);
-        assert_eq!(decision, ReconstructionDecision::Background(FallbackReason::MissingUnicode));
+    fn missing_unicode_is_a_text_failure() {
+        let decision = ReconstructionDecision::TextFailure(TextFailureReason::MissingUnicode);
+        assert_eq!(decision, ReconstructionDecision::TextFailure(TextFailureReason::MissingUnicode));
         assert_ne!(decision, ReconstructionDecision::NativeText);
     }
 }

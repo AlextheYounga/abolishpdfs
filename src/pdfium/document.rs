@@ -4,9 +4,9 @@ use pdfium_render::prelude::*;
 
 use crate::fonts::mapping_is_proven;
 use crate::model::{
-    AffineTransform, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FallbackReason, FontCatalog, FontId,
-    FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel, Point,
-    ReconstructionDecision, Rect, Size, TextObject, TextRenderMode,
+    AffineTransform, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FontCatalog, FontId, FontSource, Glyph,
+    GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel, Point, ReconstructionDecision, Rect, Size,
+    TextFailureReason, TextIntegrityFailure, TextObject, TextRenderMode,
 };
 use crate::text::projection;
 
@@ -28,6 +28,7 @@ impl DocumentExtractor {
             fonts: FontCatalog::new(),
             outlines: Vec::new(),
             diagnostics: Vec::new(),
+            text_failures: Vec::new(),
         };
 
         for index in document.pages().as_range() {
@@ -107,14 +108,26 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
     for (text_object, decision) in text_objects.iter_mut().zip(decisions) {
         text_object.reconstruction = decision;
     }
-    let fallback_paint_orders: Vec<usize> = text_objects
+    let failed_text_paint_orders: Vec<usize> = text_objects
         .iter()
-        .filter(|text_object| matches!(text_object.reconstruction, ReconstructionDecision::Background(_)))
+        .filter(|text_object| matches!(text_object.reconstruction, ReconstructionDecision::TextFailure(_)))
         .map(|text_object| text_object.paint_order)
         .collect();
 
-    let background = if needs_raster_background(&fallback_paint_orders, &graphics) {
-        match render_page_background(page, &fallback_paint_orders) {
+    model.text_failures.extend(text_objects.iter().filter_map(|text_object| {
+        let ReconstructionDecision::TextFailure(reason) = text_object.reconstruction.clone() else {
+            return None;
+        };
+        Some(TextIntegrityFailure {
+            page: index + 1,
+            paint_order: text_object.paint_order,
+            reason,
+            semantic_text_available: text_object.glyphs.iter().all(|glyph| glyph.unicode.is_some()),
+        })
+    }));
+
+    let background = if needs_raster_background(&failed_text_paint_orders, &graphics) {
+        match render_page_background(page, &failed_text_paint_orders) {
             Ok(background) => Some(background),
             Err(error) => {
                 model.diagnostics.push(DocumentDiagnostic {
@@ -137,8 +150,8 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
     PageModel { number: index + 1, size: Size { width, height }, crop_box, text_objects, graphics, links, background }
 }
 
-fn needs_raster_background(fallback_paint_orders: &[usize], graphics: &[GraphicsObject]) -> bool {
-    !fallback_paint_orders.is_empty() || !graphics.is_empty()
+fn needs_raster_background(failed_text_paint_orders: &[usize], graphics: &[GraphicsObject]) -> bool {
+    !failed_text_paint_orders.is_empty() || !graphics.is_empty()
 }
 
 struct ExtractionContext<'a, 'b> {
@@ -246,19 +259,19 @@ fn reconstruction_decision(
     model: &DocumentModel,
 ) -> ReconstructionDecision {
     if glyphs.is_empty() {
-        return ReconstructionDecision::Background(FallbackReason::ExtractionError);
+        return ReconstructionDecision::TextFailure(TextFailureReason::ExtractionError);
     }
     if glyphs.iter().any(|glyph| glyph.unicode.is_none()) {
-        return ReconstructionDecision::Background(FallbackReason::MissingUnicode);
+        return ReconstructionDecision::TextFailure(TextFailureReason::MissingUnicode);
     }
     if matches!(render_mode, TextRenderMode::Invisible | TextRenderMode::Unknown) {
-        return ReconstructionDecision::Background(FallbackReason::UnsupportedRenderMode);
+        return ReconstructionDecision::TextFailure(TextFailureReason::UnsupportedRenderMode);
     }
     if glyphs.iter().any(|glyph| glyph.tight_bounds.is_none() && glyph.loose_bounds.is_none()) {
-        return ReconstructionDecision::Background(FallbackReason::MissingGeometry);
+        return ReconstructionDecision::TextFailure(TextFailureReason::MissingGeometry);
     }
     if model.fonts.fonts.get(&font).is_some_and(|font| font.embedded.unwrap_or(true) && !font.mapping_proven) {
-        return ReconstructionDecision::Background(FallbackReason::UnprovenFontMapping);
+        return ReconstructionDecision::TextFailure(TextFailureReason::UnprovenFontMapping);
     }
     ReconstructionDecision::NativeText
 }

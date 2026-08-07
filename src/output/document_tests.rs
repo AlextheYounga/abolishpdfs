@@ -2,8 +2,8 @@ use std::fs;
 
 use super::*;
 use crate::model::{
-    AffineTransform, FallbackReason, FontCatalog, FontSource, Point, ProcessedFont, RasterBackground,
-    ReconstructionDecision, Rect, Size,
+    AffineTransform, FontCatalog, FontSource, Point, ProcessedFont, RasterBackground, ReconstructionDecision, Rect,
+    Size, TextFailureReason, TextIntegrityFailure,
 };
 
 fn model_with_text(text: &str) -> DocumentModel {
@@ -38,6 +38,7 @@ fn model_with_text(text: &str) -> DocumentModel {
         fonts: FontCatalog::new(),
         outlines: Vec::new(),
         diagnostics: Vec::new(),
+        text_failures: Vec::new(),
     }
 }
 
@@ -89,12 +90,30 @@ fn writer_emits_axis_aligned_glyph_without_transform_matrix() {
 }
 
 #[test]
-fn fallback_text_is_not_emitted_as_native_text() {
+fn failed_text_is_not_emitted_as_native_text() {
     let mut model = model_with_text("A");
     model.pages[0].text_objects[0].reconstruction =
-        ReconstructionDecision::Background(FallbackReason::UnprovenFontMapping);
+        ReconstructionDecision::TextFailure(TextFailureReason::UnprovenFontMapping);
     let output = HtmlWriter::render(&model);
     assert!(!output.index_html.contains("data-source=\"4\""));
+}
+
+#[test]
+fn failed_text_prevents_output_artifact_creation() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut model = model_with_text("A");
+    model.pages[0].text_objects[0].reconstruction =
+        ReconstructionDecision::TextFailure(TextFailureReason::MissingUnicode);
+    model.text_failures.push(TextIntegrityFailure {
+        page: 1,
+        paint_order: 4,
+        reason: TextFailureReason::MissingUnicode,
+        semantic_text_available: false,
+    });
+
+    let error = HtmlWriter::write_to(&model, directory.path()).unwrap_err();
+    assert!(error.to_string().contains("page 1 object 4"));
+    assert!(!directory.path().join("index.html").exists());
 }
 
 #[test]

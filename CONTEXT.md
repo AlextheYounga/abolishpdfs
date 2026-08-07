@@ -19,7 +19,7 @@ A modern, cross-platform PDF-to-HTML converter built in Rust with PDFium and Fon
 
 The project is not merely a PDF viewer with a transparent text layer. Its primary goal is to reconstruct PDF text as real HTML text as accurately as reasonably possible.
 
-Rendered backgrounds and invisible text overlays remain available as correctness fallbacks for cases that cannot yet be reconstructed safely.
+Rendered backgrounds remain available for graphics, but extractable text that cannot be reconstructed safely is reported as a conversion failure rather than hidden in an image.
 
 You can find the `pdf2htmlEx` core code here: docs/agents/links/pdf2htmlEx-src (symlink) 
 
@@ -165,9 +165,9 @@ The writer produces one `index.html` document, `document.css`, and assets under
 `assets/`. Every page is emitted inline as a `.page` section in document order,
 with its crop box as the CSS viewport origin. Native text is emitted per glyph
 so geometry, color, stroke, and transforms do not incorrectly inherit from the
-first glyph in a mixed text object. Text that the model marks for background
-fallback is intentionally not duplicated in the native layer until selective
-raster backgrounds are implemented.
+ first glyph in a mixed text object. Text that the model cannot reconstruct
+ natively is reported as a conversion failure instead of being hidden in a
+ raster background.
 
 Text objects whose matrix is a pure translation use each glyph's measured
 bounds as the CSS box (`left`/`top`), which is exact for horizontal text. Text
@@ -185,8 +185,7 @@ The first Phase 4 increment renders extracted page links as positioned HTML anch
 `tel` URI actions are emitted as navigable links; unsupported URI schemes remain visible in the diagnostic model
 without becoming unsafe browser navigation. Local destinations resolve to page fragments in the single document, document bookmarks are
 emitted as an outline navigation tree, and pages containing non-reconstructable text receive a selectively prepared
-raster background: native text is suppressed during rendering, while fallback text and graphics remain visible.
-Background PNGs are written to `assets/` and layered beneath native HTML text and links.
+raster background: graphics remain visible beneath native HTML text and links. A page with extractable text that is not represented natively fails normal output conversion.
 
 ## Phase 5: Graphics fidelity
 
@@ -199,8 +198,8 @@ browser-native overlays. Pages without graphics continue to avoid unnecessary ra
 
 Embedded font bytes collected by PDFium are now written as deterministic font assets and referenced by generated
 `@font-face` rules. Native glyph spans select their model font when embedded data is available, while fonts without
-usable data retain the browser's sans-serif fallback. Background text remains raster-backed when its mapping or
-geometry is not proven safe for native reconstruction.
+usable data retain the browser's sans-serif fallback. Text whose mapping or geometry is not proven safe for native
+reconstruction is reported as a structured conversion failure.
 
 Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.
