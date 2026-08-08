@@ -4,6 +4,7 @@ use abolishpdfs::{
     cli::Cli,
     output::HtmlWriter,
     pdfium::{CapabilityProbe, DocumentExtractor, PdfiumLibrary},
+    text::prepare,
 };
 use clap::Parser;
 
@@ -30,35 +31,34 @@ fn main() -> ExitCode {
                         ExitCode::FAILURE
                     }
                 }
-            } else if cli.diagnostic {
-                match DocumentExtractor::extract(&cli.input, &library) {
-                    Ok(model) => match serde_json::to_string_pretty(&model) {
-                        Ok(json) => {
-                            println!("{json}");
-                            ExitCode::SUCCESS
-                        }
-                        Err(error) => {
-                            eprintln!("Could not serialize document model: {error}");
-                            ExitCode::FAILURE
-                        }
-                    },
-                    Err(error) => {
-                        eprintln!("Document extraction failed: {error}");
-                        ExitCode::FAILURE
-                    }
-                }
             } else {
                 match DocumentExtractor::extract(&cli.input, &library) {
-                    Ok(model) => match HtmlWriter::write_to(&model, &cli.output) {
-                        Ok(()) => {
-                            println!("Wrote HTML output to {}", cli.output.display());
-                            ExitCode::SUCCESS
+                    Ok(mut model) => {
+                        prepare(&mut model);
+                        if cli.diagnostic {
+                            match serde_json::to_string_pretty(&model) {
+                                Ok(json) => {
+                                    println!("{json}");
+                                    ExitCode::SUCCESS
+                                }
+                                Err(error) => {
+                                    eprintln!("Could not serialize document model: {error}");
+                                    ExitCode::FAILURE
+                                }
+                            }
+                        } else {
+                            match HtmlWriter::write_to(&model, &cli.output) {
+                                Ok(()) => {
+                                    println!("Wrote HTML output to {}", cli.output.display());
+                                    ExitCode::SUCCESS
+                                }
+                                Err(error) => {
+                                    eprintln!("HTML output failed: {error}");
+                                    ExitCode::FAILURE
+                                }
+                            }
                         }
-                        Err(error) => {
-                            eprintln!("HTML output failed: {error}");
-                            ExitCode::FAILURE
-                        }
-                    },
+                    }
                     Err(error) => {
                         eprintln!("Document extraction failed: {error}");
                         ExitCode::FAILURE

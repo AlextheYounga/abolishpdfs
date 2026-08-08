@@ -2,12 +2,13 @@ use std::fs;
 
 use super::*;
 use crate::model::{
-    AffineTransform, FallbackReason, FontCatalog, FontSource, Point, RasterBackground, ReconstructionDecision, Rect,
-    Size,
+    AffineTransform, FallbackReason, FontCatalog, FontSource, Glyph, Point, RasterBackground, ReconstructionDecision,
+    Rect, Size, TextObject,
 };
+use crate::text::prepare;
 
 fn model_with_text(text: &str) -> DocumentModel {
-    DocumentModel {
+    let mut model = DocumentModel {
         pages: vec![PageModel {
             number: 1,
             size: Size { width: 612.0, height: 792.0 },
@@ -31,6 +32,7 @@ fn model_with_text(text: &str) -> DocumentModel {
                 render_mode: TextRenderMode::Fill,
                 reconstruction: ReconstructionDecision::NativeText,
             }],
+            prepared_runs: Vec::new(),
             graphics: Vec::new(),
             links: Vec::new(),
             background: None,
@@ -38,7 +40,9 @@ fn model_with_text(text: &str) -> DocumentModel {
         fonts: FontCatalog::new(),
         outlines: Vec::new(),
         diagnostics: Vec::new(),
-    }
+    };
+    prepare(&mut model);
+    model
 }
 
 #[test]
@@ -52,6 +56,7 @@ fn writer_converts_pdf_coordinates_to_css_coordinates() {
 fn writer_uses_crop_box_as_page_origin() {
     let mut model = model_with_text("A");
     model.pages[0].crop_box = Rect { left: 36.0, bottom: 36.0, right: 576.0, top: 756.0 };
+    prepare(&mut model);
     let output = HtmlWriter::render(&model);
     assert!(output.index_html.contains("width:540px;height:720px"));
     assert!(output.index_html.contains("left:36px;top:32px"));
@@ -62,8 +67,9 @@ fn writer_does_not_apply_transform_translation_twice() {
     let mut model = model_with_text("A");
     model.pages[0].text_objects[0].glyphs[0].transform =
         Some(AffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 72.0, f: 720.0 });
+    prepare(&mut model);
     let output = HtmlWriter::render(&model);
-    assert!(output.index_html.contains("transform:matrix(1,0,0,1,0,0)"));
+    assert!(!output.index_html.contains("transform:matrix"));
 }
 
 #[test]
@@ -73,6 +79,7 @@ fn writer_rotates_and_sizes_transformed_text_on_baseline() {
     model.pages[0].text_objects[0].glyphs[0].origin = Point { x: 220.0, y: 420.0 };
     model.pages[0].text_objects[0].glyphs[0].transform =
         Some(AffineTransform { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: 220.0, f: 420.0 });
+    prepare(&mut model);
     let output = HtmlWriter::render(&model);
     let page = &output.index_html;
     assert!(
@@ -89,10 +96,29 @@ fn writer_emits_axis_aligned_glyph_without_transform_matrix() {
 }
 
 #[test]
+fn writer_serializes_prepared_run_text_and_spacing() {
+    let mut model = model_with_text("A");
+    let mut second = model.pages[0].text_objects[0].glyphs[0].clone();
+    second.unicode = Some('B');
+    second.origin.x += 12.0;
+    second.tight_bounds = Some(Rect { left: 84.0, bottom: 710.0, right: 96.0, top: 724.0 });
+    model.pages[0].text_objects[0].glyphs.push(second);
+    prepare(&mut model);
+    assert_eq!(model.pages[0].prepared_runs.len(), 1);
+    model.pages[0].prepared_runs[0].letter_spacing = 1.25;
+
+    let output = HtmlWriter::render(&model);
+    assert_eq!(output.index_html.matches("class=\"text-run\"").count(), 1);
+    assert!(output.index_html.contains(">AB</span>"));
+    assert!(output.index_html.contains("letter-spacing:1.25px;"));
+}
+
+#[test]
 fn fallback_text_is_not_emitted_as_native_text() {
     let mut model = model_with_text("A");
     model.pages[0].text_objects[0].reconstruction =
         ReconstructionDecision::Background(FallbackReason::UnprovenFontMapping);
+    prepare(&mut model);
     let output = HtmlWriter::render(&model);
     assert!(!output.index_html.contains("data-source=\"4\""));
 }
@@ -134,6 +160,7 @@ fn writer_embeds_fonts_and_assigns_native_glyphs() {
         used_unicode: vec!['A'],
         mapping_proven: true,
     });
+    prepare(&mut model);
     let output = HtmlWriter::render(&model);
     assert!(output.document_css.contains("@font-face{font-family:'pdf-font-0';src:url('assets/font-0.ttf');}"));
     assert!(output.assets.contains(&("font-0.ttf".to_owned(), vec![0, 1, 0, 0, 1])));

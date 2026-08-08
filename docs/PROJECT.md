@@ -19,7 +19,7 @@ A modern, cross-platform PDF-to-HTML converter built in Rust with PDFium and Fon
 
 The project is not merely a PDF viewer with a transparent text layer. Its primary goal is to reconstruct PDF text as real HTML text as accurately as reasonably possible.
 
-Rendered backgrounds and invisible text overlays remain available as correctness fallbacks for cases that cannot yet be reconstructed safely.
+Rendered backgrounds remain available as correctness fallbacks for cases that cannot yet be reconstructed safely.
 
 You can find the `pdf2htmlEx` core code here: docs/agents/links/pdf2htmlEx-src (symlink) 
 
@@ -158,15 +158,16 @@ abolishpdfs --pdfium-path /path/to/libpdfium.so --output output document.pdf
 
 The writer produces one `index.html` document, `document.css`, and assets under
 `assets/`. Every page is emitted inline as a `.page` section in document order,
-with its crop box as the CSS viewport origin. Native text is emitted per glyph
-so geometry, color, stroke, and transforms do not incorrectly inherit from the
-first glyph in a mixed text object. Text that the model marks for background
-fallback is intentionally not duplicated in the native layer until selective
-raster backgrounds are implemented.
+with its crop box as the CSS viewport origin. Native text is prepared into
+ordered compatible runs before serialization. Runs carry shared font, paint,
+baseline placement, normalized transform, and spacing metadata; style,
+baseline, progression, and large-gap discontinuities start a new run. Text that
+the model marks for background fallback is not duplicated in the native layer.
 
-Text objects whose matrix is a pure translation use each glyph's measured
-bounds as the CSS box (`left`/`top`), which is exact for horizontal text. Text
-objects carrying rotation, skew, or anisotropic scale are projected the way
+Pure-translation runs use the first glyph's measured bounds as the CSS box
+(`left`/`top`), which is exact for horizontal text when browser font metrics
+match the source font. Rotated, skewed, or anisotropically scaled runs are
+projected the way
 pdf2htmlEX does in `HTMLRenderer/state.cc`: the vertical scale is absorbed into
 `font-size` (computed from the unscaled `Tf` size times `hypot(c, d)`), the
 remaining matrix is y-flipped into a `transform:matrix(...)` with zero
@@ -193,7 +194,7 @@ browser-native overlays. Pages without graphics continue to avoid unnecessary ra
 ## Phase 6: Embedded font output
 
 Embedded font bytes collected by PDFium are now written as deterministic font assets and referenced by generated
-`@font-face` rules. Native glyph spans select their model font when embedded data is available, while fonts without
+`@font-face` rules. Native text runs select their model font when embedded data is available, while fonts without
 usable data retain the browser's sans-serif fallback. Background text remains raster-backed when its mapping or
 geometry is not proven safe for native reconstruction.
 

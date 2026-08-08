@@ -133,7 +133,16 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         .filter_map(|link| link.rect().ok().map(|bounds| Link { bounds: rect(bounds), target: link_target(&link) }))
         .collect();
 
-    PageModel { number: index + 1, size: Size { width, height }, crop_box, text_objects, graphics, links, background }
+    PageModel {
+        number: index + 1,
+        size: Size { width, height },
+        crop_box,
+        text_objects,
+        prepared_runs: Vec::new(),
+        graphics,
+        links,
+        background,
+    }
 }
 
 fn needs_raster_background(fallback_paint_orders: &[usize], graphics: &[GraphicsObject]) -> bool {
