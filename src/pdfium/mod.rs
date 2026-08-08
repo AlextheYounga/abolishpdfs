@@ -1,6 +1,7 @@
 mod background;
 mod document;
 mod library;
+mod paint;
 mod probe;
 mod report;
 

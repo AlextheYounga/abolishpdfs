@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use super::font::FontId;
 use super::geometry::{AffineTransform, Color, Point, Rect};
+use super::page::ClipState;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TextObject {
@@ -11,6 +12,8 @@ pub struct TextObject {
     pub font: FontId,
     pub render_mode: TextRenderMode,
     pub reconstruction: ReconstructionDecision,
+    pub visibility: VisibilityDecision,
+    pub clipping: ClipState,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -49,6 +52,15 @@ pub enum FallbackReason {
     MissingGeometry,
     UnsupportedRenderMode,
     ExtractionError,
+    CoveredByOpaquePaint,
+    AmbiguousVisibility,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum VisibilityDecision {
+    Visible,
+    CoveredByOpaquePaint,
+    AmbiguousVisibility,
 }
 
 #[cfg(test)]

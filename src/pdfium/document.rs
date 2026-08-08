@@ -4,14 +4,15 @@ use pdfium_render::prelude::*;
 
 use crate::fonts::mapping_is_proven;
 use crate::model::{
-    AffineTransform, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FallbackReason, FontCatalog, FontId,
-    FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel, Point,
-    ReconstructionDecision, Rect, Size, TextObject, TextRenderMode,
+    AffineTransform, ClipState, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FallbackReason, FontCatalog,
+    FontId, FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel, Point,
+    ReconstructionDecision, Rect, Size, TextObject, TextRenderMode, VisibilityDecision,
 };
-use crate::text::projection;
+use crate::text::{projection, visibility};
 
 use super::PdfiumLibrary;
 use super::background::render_page_background;
+use super::paint::{clip_state, paint_opacity};
 #[cfg(test)]
 #[path = "document_tests.rs"]
 mod tests;
@@ -91,7 +92,7 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
             page_number: index + 1,
         };
         for object in page.objects().iter() {
-            if let Some(graphics_object) = extract_object(&object, page_text.as_ref(), &mut context) {
+            if let Some(graphics_object) = extract_object(&object, page_text.as_ref(), &mut context, false) {
                 graphics.push(graphics_object);
             }
         }
@@ -105,6 +106,21 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         .collect::<Vec<_>>();
     for (text_object, decision) in text_objects.iter_mut().zip(decisions) {
         text_object.reconstruction = decision;
+    }
+    visibility::analyze(&mut text_objects, &graphics);
+    for text_object in &text_objects {
+        if matches!(text_object.visibility, VisibilityDecision::AmbiguousVisibility)
+            && matches!(
+                text_object.reconstruction,
+                ReconstructionDecision::Background(FallbackReason::AmbiguousVisibility)
+            )
+        {
+            model.diagnostics.push(DocumentDiagnostic {
+                scope: DiagnosticScope::Object { page: index + 1, paint_order: text_object.paint_order },
+                message: "extractable text has ambiguous visibility and is retained in the raster background"
+                    .to_owned(),
+            });
+        }
     }
     let fallback_paint_orders: Vec<usize> = text_objects
         .iter()
@@ -152,9 +168,11 @@ fn extract_object(
     object: &PdfPageObject<'_>,
     page_text: Option<&PdfPageText<'_>>,
     context: &mut ExtractionContext<'_, '_>,
+    inherited_clipping: bool,
 ) -> Option<GraphicsObject> {
     let paint_order = *context.next_paint_order;
     *context.next_paint_order += 1;
+    let clipping = inherited_clipping || matches!(clip_state(object), ClipState::Clipped);
 
     if let PdfPageObject::Text(text) = object {
         let object_glyphs = match page_text {
@@ -194,13 +212,15 @@ fn extract_object(
             font,
             render_mode,
             reconstruction,
+            visibility: VisibilityDecision::Visible,
+            clipping: if clipping { ClipState::Clipped } else { ClipState::Unclipped },
         });
         return None;
     }
 
     let children = match object {
         PdfPageObject::XObjectForm(form) => {
-            form.iter().filter_map(|child| extract_object(&child, page_text, context)).collect()
+            form.iter().filter_map(|child| extract_object(&child, page_text, context, clipping)).collect()
         }
         _ => Vec::new(),
     };
@@ -210,6 +230,8 @@ fn extract_object(
         kind: graphics_kind(object),
         bounds: object.bounds().ok().map(|bounds| rect(bounds.to_rect())),
         active: object.is_active().ok(),
+        opacity: paint_opacity(object),
+        clipping: if clipping { ClipState::Clipped } else { ClipState::Unclipped },
         children,
     })
 }

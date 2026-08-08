@@ -1,4 +1,5 @@
 use super::{GraphicsKind, GraphicsObject, needs_raster_background};
+use crate::model::{ClipState, PaintOpacity};
 
 #[test]
 fn graphics_require_a_raster_background() {
@@ -7,6 +8,8 @@ fn graphics_require_a_raster_background() {
         kind: GraphicsKind::Path,
         bounds: None,
         active: Some(true),
+        opacity: PaintOpacity::Unknown,
+        clipping: ClipState::Unclipped,
         children: Vec::new(),
     }];
     assert!(needs_raster_background(&[], &graphics));

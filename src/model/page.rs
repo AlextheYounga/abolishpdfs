@@ -28,7 +28,22 @@ pub struct GraphicsObject {
     pub kind: GraphicsKind,
     pub bounds: Option<Rect>,
     pub active: Option<bool>,
+    pub opacity: PaintOpacity,
+    pub clipping: ClipState,
     pub children: Vec<GraphicsObject>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum PaintOpacity {
+    Opaque,
+    Transparent,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ClipState {
+    Unclipped,
+    Clipped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -19,7 +19,7 @@ A modern, cross-platform PDF-to-HTML converter built in Rust with PDFium and Fon
 
 The project is not merely a PDF viewer with a transparent text layer. Its primary goal is to reconstruct PDF text as real HTML text as accurately as reasonably possible.
 
-Rendered backgrounds and invisible text overlays remain available as correctness fallbacks for cases that cannot yet be reconstructed safely.
+Rendered backgrounds remain available as correctness fallbacks for graphics and text that cannot yet be reconstructed safely. Native-text integrity failures are recorded in the diagnostic model instead of silently accepting uncertain extraction.
 
 You can find the `pdf2htmlEx` core code here: docs/agents/links/pdf2htmlEx-src (symlink) 
 
@@ -196,6 +196,14 @@ Embedded font bytes collected by PDFium are now written as deterministic font as
 `@font-face` rules. Native glyph spans select their model font when embedded data is available, while fonts without
 usable data retain the browser's sans-serif fallback. Background text remains raster-backed when its mapping or
 geometry is not proven safe for native reconstruction.
+
+## Visibility and failure policy
+
+The extraction pass analyzes text against later paint objects using owned model data. Complete containment by an active,
+opaque, unclipped path is classified as `CoveredByOpaquePaint`; partial overlap, unknown bounds, transparency, or clipping
+is classified as `AmbiguousVisibility`. Overlap alone never proves coverage. Visibility-driven background fallback is
+represented by `FallbackReason` and serialized with each text object; ambiguous extractable text also receives an
+object-scoped diagnostic.
 
 Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.

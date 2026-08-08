@@ -2,8 +2,8 @@ use std::fs;
 
 use super::*;
 use crate::model::{
-    AffineTransform, FallbackReason, FontCatalog, FontSource, Point, RasterBackground, ReconstructionDecision, Rect,
-    Size,
+    AffineTransform, ClipState, FallbackReason, FontCatalog, FontSource, Point, RasterBackground,
+    ReconstructionDecision, Rect, Size, VisibilityDecision,
 };
 
 fn model_with_text(text: &str) -> DocumentModel {
@@ -30,6 +30,8 @@ fn model_with_text(text: &str) -> DocumentModel {
                 font: 0,
                 render_mode: TextRenderMode::Fill,
                 reconstruction: ReconstructionDecision::NativeText,
+                visibility: VisibilityDecision::Visible,
+                clipping: ClipState::Unclipped,
             }],
             graphics: Vec::new(),
             links: Vec::new(),
