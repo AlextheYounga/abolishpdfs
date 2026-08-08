@@ -163,6 +163,10 @@ ordered compatible runs before serialization. Runs carry shared font, paint,
 baseline placement, normalized transform, and spacing metadata; style,
 baseline, progression, and large-gap discontinuities start a new run. Text that
 the model marks for background fallback is not duplicated in the native layer.
+Prepared runs retain observed progression advances and use `ttf-parser` to
+calculate run-level compensation for parseable embedded fonts. Residual
+per-glyph differences are emitted as inline offset spans. No browser advance is
+inferred from ink bounds; fallback fonts retain zero compensation.
 
 Pure-translation runs use the first glyph's measured bounds as the CSS box
 (`left`/`top`), which is exact for horizontal text when browser font metrics

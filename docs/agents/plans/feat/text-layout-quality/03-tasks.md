@@ -27,6 +27,7 @@ Run preparation now groups compatible native glyphs per source text object, pres
 source order and spaces, and starts new runs for style, baseline, transform, or
 large progression discontinuities. Pure translations use first-glyph bounds;
 transformed runs retain normalized y-flipped CSS matrices. `letter_spacing` is
-serialized and tested, but remains zero until browser/font advance measurement is
-available from the font-processing work; generated layout spaces and local offset
-compensation remain deliberately unsupported in this increment.
+computed from parseable embedded-font metrics, with residual per-glyph differences
+represented as local inline offsets. Fallback fonts retain zero compensation
+until browser/font advance measurement is available. Generated layout spaces
+remain deliberately unsupported; source and PDFium-generated spaces are kept.

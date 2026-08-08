@@ -1,6 +1,8 @@
 use crate::model::{
-    AffineTransform, Glyph, PageModel, PreparedRun, ReconstructionDecision, RunPlacement, RunStyle, TextObject,
+    AffineTransform, FontCatalog, Glyph, PageModel, PreparedRun, ReconstructionDecision, RunOffset, RunPlacement,
+    RunStyle, TextObject,
 };
+use ttf_parser::Face;
 
 use super::projection::{self, Projection};
 
@@ -8,6 +10,7 @@ const BASELINE_TOLERANCE: f32 = 0.5;
 const FONT_SIZE_RELATIVE_TOLERANCE: f32 = 0.05;
 const LAYOUT_GAP_FACTOR: f32 = 2.0;
 const GEOMETRY_TOLERANCE: f32 = 1e-3;
+const SPACING_TOLERANCE: f32 = 0.05;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum TransformClass {
@@ -15,11 +18,11 @@ enum TransformClass {
     Projected(Projection),
 }
 
-pub fn prepare_page(page: &PageModel) -> Vec<PreparedRun> {
-    page.text_objects.iter().flat_map(|object| prepare_object(page, object)).collect()
+pub fn prepare_page(page: &PageModel, fonts: &FontCatalog) -> Vec<PreparedRun> {
+    page.text_objects.iter().flat_map(|object| prepare_object(page, object, fonts)).collect()
 }
 
-fn prepare_object(page: &PageModel, object: &TextObject) -> Vec<PreparedRun> {
+fn prepare_object(page: &PageModel, object: &TextObject, fonts: &FontCatalog) -> Vec<PreparedRun> {
     if !matches!(object.reconstruction, ReconstructionDecision::NativeText) {
         return Vec::new();
     }
@@ -33,7 +36,7 @@ fn prepare_object(page: &PageModel, object: &TextObject) -> Vec<PreparedRun> {
     let mut start = 0;
     for end in 1..=glyphs.len() {
         if end == glyphs.len() || !continues(&glyphs[start..end], glyphs[end]) {
-            runs.push(build_run(page, object, &glyphs[start..end]));
+            runs.push(build_run(page, object, &glyphs[start..end], fonts));
             start = end;
         }
     }
@@ -106,7 +109,7 @@ fn projections_match(first: Projection, next: Projection) -> bool {
         && (first.d - next.d).abs() <= GEOMETRY_TOLERANCE
 }
 
-fn build_run(page: &PageModel, object: &TextObject, glyphs: &[&Glyph]) -> PreparedRun {
+fn build_run(page: &PageModel, object: &TextObject, glyphs: &[&Glyph], fonts: &FontCatalog) -> PreparedRun {
     let first = glyphs[0];
     let transform = transform_class(first.transform.as_ref());
     let placement = match transform {
@@ -136,8 +139,74 @@ fn build_run(page: &PageModel, object: &TextObject, glyphs: &[&Glyph]) -> Prepar
             render_mode: object.render_mode,
         },
         placement,
-        letter_spacing: 0.0,
+        observed_advances: glyphs.windows(2).map(|pair| observed_advance(pair[0], pair[1], transform)).collect(),
+        local_offsets: run_local_offsets(glyphs, transform, fonts),
+        letter_spacing: run_letter_spacing(glyphs, transform, fonts),
         text: glyphs.iter().filter_map(|glyph| glyph.unicode).collect(),
+    }
+}
+
+fn run_letter_spacing(glyphs: &[&Glyph], transform: TransformClass, fonts: &FontCatalog) -> f32 {
+    let mut compensations = glyphs
+        .windows(2)
+        .filter_map(|pair| measured_compensation(pair[0], pair[1], transform, fonts))
+        .collect::<Vec<_>>();
+    if compensations.is_empty() {
+        return 0.0;
+    }
+    compensations.sort_by(f32::total_cmp);
+    compensations[compensations.len() / 2]
+}
+
+fn run_local_offsets(glyphs: &[&Glyph], transform: TransformClass, fonts: &FontCatalog) -> Vec<RunOffset> {
+    let letter_spacing = run_letter_spacing(glyphs, transform, fonts);
+    glyphs
+        .windows(2)
+        .enumerate()
+        .filter_map(|(index, pair)| {
+            let amount = measured_compensation(pair[0], pair[1], transform, fonts)? - letter_spacing;
+            (amount.abs() > SPACING_TOLERANCE).then_some(RunOffset { character_index: index + 1, amount })
+        })
+        .collect()
+}
+
+fn measured_compensation(
+    previous: &Glyph,
+    next: &Glyph,
+    transform: TransformClass,
+    fonts: &FontCatalog,
+) -> Option<f32> {
+    let character = previous.unicode?;
+    let natural = natural_advance(previous, character, transform, fonts)?;
+    Some(observed_advance(previous, next, transform) - natural)
+}
+
+fn natural_advance(glyph: &Glyph, character: char, transform: TransformClass, fonts: &FontCatalog) -> Option<f32> {
+    let font_id = glyph.font?;
+    let data = fonts.fonts.get(&font_id)?.data.as_deref()?;
+    let face = Face::parse(data, 0).ok()?;
+    let glyph_id = face.glyph_index(character)?;
+    let advance = f32::from(face.glyph_hor_advance(glyph_id)?);
+    let units_per_em = f32::from(face.units_per_em());
+    let horizontal_scale = match transform {
+        TransformClass::Identity => 1.0,
+        TransformClass::Projected(projection) => projection.a.hypot(projection.b),
+    };
+    Some(advance / units_per_em * glyph.font_size * horizontal_scale)
+}
+
+fn observed_advance(previous: &Glyph, next: &Glyph, transform: TransformClass) -> f32 {
+    let delta = (next.origin.x - previous.origin.x, next.origin.y - previous.origin.y);
+    match transform {
+        TransformClass::Identity => delta.0,
+        TransformClass::Projected(projection) => {
+            let length = projection.a.hypot(projection.b);
+            if length <= GEOMETRY_TOLERANCE {
+                delta.0.hypot(delta.1)
+            } else {
+                (delta.0 * projection.a + delta.1 * projection.b) / length
+            }
+        }
     }
 }
 
@@ -187,20 +256,24 @@ mod tests {
 
     #[test]
     fn compatible_glyphs_form_one_run_in_source_order() {
-        let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 18.0, 80.0)])));
+        let runs =
+            prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 18.0, 80.0)])), &FontCatalog::new());
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].text, "AB");
+        assert_eq!(runs[0].observed_advances, vec![8.0]);
     }
 
     #[test]
     fn baseline_change_starts_a_new_run() {
-        let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 18.0, 82.0)])));
+        let runs =
+            prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 18.0, 82.0)])), &FontCatalog::new());
         assert_eq!(runs.len(), 2);
     }
 
     #[test]
     fn large_horizontal_gap_starts_a_new_run() {
-        let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 40.0, 80.0)])));
+        let runs =
+            prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 40.0, 80.0)])), &FontCatalog::new());
         assert_eq!(runs.len(), 2);
     }
 
@@ -208,7 +281,7 @@ mod tests {
     fn style_change_starts_a_new_run() {
         let mut second = glyph('B', 18.0, 80.0);
         second.fill = Some(Color { red: 255, green: 0, blue: 0, alpha: 255 });
-        let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), second])));
+        let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), second])), &FontCatalog::new());
         assert_eq!(runs.len(), 2);
     }
 
@@ -216,6 +289,6 @@ mod tests {
     fn fallback_objects_do_not_form_native_runs() {
         let mut text_object = object(vec![glyph('A', 10.0, 80.0)]);
         text_object.reconstruction = ReconstructionDecision::Background(FallbackReason::MissingUnicode);
-        assert!(prepare_page(&page(text_object)).is_empty());
+        assert!(prepare_page(&page(text_object), &FontCatalog::new()).is_empty());
     }
 }

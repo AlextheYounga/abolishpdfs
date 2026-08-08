@@ -18,8 +18,16 @@ pub struct PreparedRun {
     pub source: usize,
     pub style: RunStyle,
     pub placement: RunPlacement,
+    pub observed_advances: Vec<f32>,
+    pub local_offsets: Vec<RunOffset>,
     pub letter_spacing: f32,
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RunOffset {
+    pub character_index: usize,
+    pub amount: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

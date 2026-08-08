@@ -106,11 +106,13 @@ fn writer_serializes_prepared_run_text_and_spacing() {
     prepare(&mut model);
     assert_eq!(model.pages[0].prepared_runs.len(), 1);
     model.pages[0].prepared_runs[0].letter_spacing = 1.25;
+    model.pages[0].prepared_runs[0].local_offsets.push(RunOffset { character_index: 1, amount: -0.5 });
 
     let output = HtmlWriter::render(&model);
     assert_eq!(output.index_html.matches("class=\"text-run\"").count(), 1);
-    assert!(output.index_html.contains(">AB</span>"));
+    assert!(output.index_html.contains(">A<span class=\"text-offset\""));
     assert!(output.index_html.contains("letter-spacing:1.25px;"));
+    assert!(output.index_html.contains("class=\"text-offset\" aria-hidden=\"true\" style=\"margin-left:-0.5px\""));
 }
 
 #[test]

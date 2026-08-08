@@ -1,7 +1,7 @@
 use std::{fs, io, path::Path};
 
 use crate::model::{
-    Color, DocumentModel, FontCatalog, Link, LinkTarget, OutlineItem, PageModel, PreparedRun, RunPlacement,
+    Color, DocumentModel, FontCatalog, Link, LinkTarget, OutlineItem, PageModel, PreparedRun, RunOffset, RunPlacement,
     TextRenderMode,
 };
 use crate::text::projection::{self, css_number};
@@ -14,6 +14,7 @@ body { padding: 24px; }
 .page { position: relative; overflow: hidden; background: white; box-shadow: 0 2px 12px #2228; }
 .page-content { position: absolute; inset: 0; overflow: hidden; transform-origin: 0 0; }
 .text-run { position: absolute; white-space: pre; transform-origin: left bottom; }
+.text-offset { display: inline-block; width: 0; height: 0; }
 .page-background { position: absolute; inset: 0; width: 100%; height: 100%; }
 .page-link { position: absolute; z-index: 2; }
 @media print {
@@ -139,8 +140,24 @@ fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog) {
         css_number(run.style.font_size),
         css_color(fill),
         render_mode_style(run.style.render_mode, run.style.stroke),
-        escape_html(&run.text)
+        render_run_text(&run.text, &run.local_offsets)
     ));
+}
+
+fn render_run_text(text: &str, offsets: &[RunOffset]) -> String {
+    let mut rendered = String::new();
+    let mut offset_index = 0;
+    for (character_index, character) in text.chars().enumerate() {
+        while let Some(offset) = offsets.get(offset_index).filter(|offset| offset.character_index == character_index) {
+            rendered.push_str(&format!(
+                "<span class=\"text-offset\" aria-hidden=\"true\" style=\"margin-left:{}px\"></span>",
+                css_number(offset.amount)
+            ));
+            offset_index += 1;
+        }
+        rendered.push_str(&escape_html(&character.to_string()));
+    }
+    rendered
 }
 
 fn render_outline_item(html: &mut String, item: &OutlineItem) {
