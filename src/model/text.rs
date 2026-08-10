@@ -17,6 +17,38 @@ pub struct TextObject {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PreparedRun {
+    pub source: usize,
+    pub style: RunStyle,
+    pub placement: RunPlacement,
+    pub observed_advances: Vec<f32>,
+    pub local_offsets: Vec<RunOffset>,
+    pub letter_spacing: f32,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RunOffset {
+    pub character_index: usize,
+    pub amount: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RunStyle {
+    pub font: Option<FontId>,
+    pub font_size: f32,
+    pub fill: Option<Color>,
+    pub stroke: Option<Color>,
+    pub render_mode: TextRenderMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum RunPlacement {
+    Bounded { left: f32, top: f32 },
+    Transformed { left: f32, bottom: f32, matrix: [f32; 4] },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Glyph {
     pub unicode: Option<char>,
     pub font: Option<FontId>,

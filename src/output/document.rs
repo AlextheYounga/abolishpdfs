@@ -1,8 +1,8 @@
 use std::{fmt, fs, io, path::Path};
 
 use crate::model::{
-    Color, DocumentModel, FontCatalog, Glyph, Link, LinkTarget, OutlineItem, PageModel, ReconstructionDecision,
-    TextIntegrityFailure, TextObject, TextRenderMode,
+    Color, DocumentModel, FontCatalog, Link, LinkTarget, OutlineItem, PageModel, PreparedRun, RunOffset, RunPlacement,
+    TextIntegrityFailure, TextRenderMode,
 };
 use crate::text::projection::{self, css_number};
 
@@ -13,7 +13,8 @@ body { padding: 24px; }
 .document { display: flex; flex-direction: column; align-items: center; gap: 24px; }
 .page { position: relative; overflow: hidden; background: white; box-shadow: 0 2px 12px #2228; }
 .page-content { position: absolute; inset: 0; overflow: hidden; transform-origin: 0 0; }
-.text-glyph { position: absolute; white-space: pre; transform-origin: left bottom; }
+.text-run { position: absolute; white-space: pre; transform-origin: left bottom; }
+.text-offset { display: inline-block; width: 0; height: 0; }
 .page-background { position: absolute; inset: 0; width: 100%; height: 100%; }
 .page-link { position: absolute; z-index: 2; }
 @media print {
@@ -103,8 +104,8 @@ fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog) {
     if page.background.is_some() {
         html.push_str(&format!("<img class=\"page-background\" alt=\"\" src=\"assets/page-{}.png\">", page.number));
     }
-    for text_object in &page.text_objects {
-        render_text_object(html, page, text_object, fonts);
+    for run in &page.prepared_runs {
+        render_run(html, run, fonts);
     }
     for link in &page.links {
         render_link(html, page, link);
@@ -112,57 +113,55 @@ fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog) {
     html.push_str("</div></section>");
 }
 
-fn render_text_object(html: &mut String, page: &PageModel, text_object: &TextObject, fonts: &FontCatalog) {
-    if !matches!(text_object.reconstruction, ReconstructionDecision::NativeText) {
-        return;
+fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog) {
+    let fill = run.style.fill.unwrap_or(Color::BLACK);
+    let family = run
+        .style
+        .font
+        .and_then(|id| fonts.fonts.get(&id))
+        .and_then(|font| font.processed.as_ref())
+        .map_or_else(|| "sans-serif".to_owned(), |font| format!("'{}',sans-serif", font.family_name));
+    let position = match run.placement {
+        RunPlacement::Bounded { left, top } => format!("left:{}px;top:{}px;", css_number(left), css_number(top)),
+        RunPlacement::Transformed { left, bottom, matrix } => format!(
+            "left:{}px;bottom:{}px;transform:matrix({},{},{},{},0,0);",
+            css_number(left),
+            css_number(bottom),
+            css_number(matrix[0]),
+            css_number(-matrix[1]),
+            css_number(-matrix[2]),
+            css_number(matrix[3])
+        ),
+    };
+    let spacing = if run.letter_spacing.abs() > projection::EPSILON {
+        format!("letter-spacing:{}px;", css_number(run.letter_spacing))
+    } else {
+        String::new()
+    };
+    html.push_str(&format!(
+        "<span class=\"text-run\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};{spacing}{}\">{}</span>",
+        run.source,
+        css_number(run.style.font_size),
+        css_color(fill),
+        render_mode_style(run.style.render_mode, run.style.stroke),
+        render_run_text(&run.text, &run.local_offsets)
+    ));
+}
+
+fn render_run_text(text: &str, offsets: &[RunOffset]) -> String {
+    let mut rendered = String::new();
+    let mut offset_index = 0;
+    for (character_index, character) in text.chars().enumerate() {
+        while let Some(offset) = offsets.get(offset_index).filter(|offset| offset.character_index == character_index) {
+            rendered.push_str(&format!(
+                "<span class=\"text-offset\" aria-hidden=\"true\" style=\"margin-left:{}px\"></span>",
+                css_number(offset.amount)
+            ));
+            offset_index += 1;
+        }
+        rendered.push_str(&escape_html(&character.to_string()));
     }
-    for glyph in &text_object.glyphs {
-        let Some(unicode) = glyph.unicode else {
-            continue;
-        };
-        let fill = glyph.fill.unwrap_or(Color::BLACK);
-        let font_family =
-            glyph.font.and_then(|id| fonts.fonts.get(&id).and_then(|font| font.processed.as_ref()).map(|_| id));
-        let position = match glyph.transform.as_ref() {
-            Some(matrix) if !projection::is_identity(matrix) => {
-                let projection = projection::project(matrix).unwrap_or_else(|| projection::Projection {
-                    scale: 1.0,
-                    a: matrix.a,
-                    b: matrix.b,
-                    c: matrix.c,
-                    d: matrix.d,
-                });
-                format!(
-                    "left:{}px;bottom:{}px;{}",
-                    css_number(glyph.origin.x - page.crop_box.left),
-                    css_number(glyph.origin.y - page.crop_box.bottom),
-                    projection.to_css()
-                )
-            }
-            Some(_) => format!(
-                "left:{}px;top:{}px;transform:matrix(1,0,0,1,0,0);",
-                css_number(placement(page, glyph).left),
-                css_number(placement(page, glyph).top)
-            ),
-            None => format!(
-                "left:{}px;top:{}px;",
-                css_number(placement(page, glyph).left),
-                css_number(placement(page, glyph).top)
-            ),
-        };
-        let family = font_family
-            .and_then(|id| fonts.fonts.get(&id))
-            .and_then(|font| font.processed.as_ref())
-            .map_or_else(|| "sans-serif".to_owned(), |font| format!("'{}',sans-serif", font.family_name));
-        html.push_str(&format!(
-            "<span class=\"text-glyph\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};{}\">{}</span>",
-            text_object.source,
-            css_number(glyph.font_size),
-            css_color(fill),
-            render_mode_style(text_object.render_mode, glyph),
-            escape_html(&unicode.to_string())
-        ));
-    }
+    rendered
 }
 
 fn render_outline_item(html: &mut String, item: &OutlineItem) {
@@ -220,24 +219,10 @@ fn is_safe_uri(uri: &str) -> bool {
     matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "mailto" | "tel")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Placement {
-    left: f32,
-    top: f32,
-}
-
-fn placement(page: &PageModel, glyph: &Glyph) -> Placement {
-    let bounds = glyph.tight_bounds.or(glyph.loose_bounds);
-    let left = bounds.map_or(glyph.origin.x, |bounds| bounds.left) - page.crop_box.left;
-    let top =
-        bounds.map_or(page.crop_box.top - glyph.origin.y - glyph.font_size, |bounds| page.crop_box.top - bounds.top);
-    Placement { left, top }
-}
-
-fn render_mode_style(mode: TextRenderMode, glyph: &Glyph) -> String {
+fn render_mode_style(mode: TextRenderMode, stroke: Option<Color>) -> String {
     match mode {
         TextRenderMode::Stroke | TextRenderMode::FillStroke => {
-            glyph.stroke.map(|color| format!("-webkit-text-stroke:1px {};", css_color(color))).unwrap_or_default()
+            stroke.map(|color| format!("-webkit-text-stroke:1px {};", css_color(color))).unwrap_or_default()
         }
         _ => String::new(),
     }

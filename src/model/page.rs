@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use super::geometry::{Rect, Size};
 use super::navigation::Link;
-use super::text::TextObject;
+use super::text::{PreparedRun, TextObject};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PageModel {
@@ -10,6 +10,7 @@ pub struct PageModel {
     pub size: Size,
     pub crop_box: Rect,
     pub text_objects: Vec<TextObject>,
+    pub prepared_runs: Vec<PreparedRun>,
     pub graphics: Vec<GraphicsObject>,
     pub links: Vec<Link>,
     pub background: Option<RasterBackground>,

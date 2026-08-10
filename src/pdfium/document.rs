@@ -101,14 +101,9 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         }
     }
     prove_font_mappings(model);
-    let decisions = text_objects
-        .iter()
-        .map(|text_object| {
-            reconstruction_decision(&text_object.glyphs, text_object.font, text_object.render_mode, model)
-        })
-        .collect::<Vec<_>>();
-    for (text_object, decision) in text_objects.iter_mut().zip(decisions) {
-        text_object.reconstruction = decision;
+    for text_object in &mut text_objects {
+        text_object.reconstruction =
+            reconstruction_decision(&text_object.glyphs, text_object.font, text_object.render_mode, model);
     }
     visibility::analyze(&mut text_objects, &graphics);
     for text_object in &text_objects {
@@ -125,23 +120,19 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
             });
         }
     }
-    let failed_text_paint_orders: Vec<usize> = text_objects
-        .iter()
-        .filter(|text_object| matches!(text_object.reconstruction, ReconstructionDecision::TextFailure(_)))
-        .map(|text_object| text_object.paint_order)
-        .collect();
-
-    model.text_failures.extend(text_objects.iter().filter_map(|text_object| {
+    let mut failed_text_paint_orders = Vec::new();
+    for text_object in &text_objects {
         let ReconstructionDecision::TextFailure(reason) = text_object.reconstruction.clone() else {
-            return None;
+            continue;
         };
-        Some(TextIntegrityFailure {
+        failed_text_paint_orders.push(text_object.paint_order);
+        model.text_failures.push(TextIntegrityFailure {
             page: index + 1,
             paint_order: text_object.paint_order,
             reason,
             semantic_text_available: text_object.glyphs.iter().all(|glyph| glyph.unicode.is_some()),
-        })
-    }));
+        });
+    }
 
     let background = if needs_raster_background(&failed_text_paint_orders, &graphics) {
         match render_page_background(page, &failed_text_paint_orders) {
@@ -164,7 +155,16 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         .filter_map(|link| link.rect().ok().map(|bounds| Link { bounds: rect(bounds), target: link_target(&link) }))
         .collect();
 
-    PageModel { number: index + 1, size: Size { width, height }, crop_box, text_objects, graphics, links, background }
+    PageModel {
+        number: index + 1,
+        size: Size { width, height },
+        crop_box,
+        text_objects,
+        prepared_runs: Vec::new(),
+        graphics,
+        links,
+        background,
+    }
 }
 
 fn needs_raster_background(failed_text_paint_orders: &[usize], graphics: &[GraphicsObject]) -> bool {

@@ -163,15 +163,21 @@ abolishpdfs --pdfium-path /path/to/libpdfium.so --output output document.pdf
 
 The writer produces one `index.html` document, `document.css`, and assets under
 `assets/`. Every page is emitted inline as a `.page` section in document order,
-with its crop box as the CSS viewport origin. Native text is emitted per glyph
-so geometry, color, stroke, and transforms do not incorrectly inherit from the
- first glyph in a mixed text object. Text that the model cannot reconstruct
- natively is reported as a conversion failure instead of being hidden in a
- raster background.
+with its crop box as the CSS viewport origin. Native text is prepared into
+ordered compatible runs before serialization. Runs carry shared font, paint,
+baseline placement, normalized transform, and spacing metadata; style,
+baseline, progression, and large-gap discontinuities start a new run. Prepared
+runs retain observed progression advances and use `ttf-parser` to calculate
+run-level compensation for parseable embedded fonts. Residual per-glyph
+differences are emitted as inline offset spans. No browser advance is inferred
+from ink bounds; fallback fonts retain zero compensation. Text that the model
+cannot reconstruct natively is reported as a conversion failure instead of
+being hidden in a raster background.
 
-Text objects whose matrix is a pure translation use each glyph's measured
-bounds as the CSS box (`left`/`top`), which is exact for horizontal text. Text
-objects carrying rotation, skew, or anisotropic scale are projected the way
+Pure-translation runs use the first glyph's measured bounds as the CSS box
+(`left`/`top`), which is exact for horizontal text when browser font metrics
+match the source font. Rotated, skewed, or anisotropically scaled runs are
+projected the way
 pdf2htmlEX does in `HTMLRenderer/state.cc`: the vertical scale is absorbed into
 `font-size` (computed from the unscaled `Tf` size times `hypot(c, d)`), the
 remaining matrix is y-flipped into a `transform:matrix(...)` with zero
@@ -197,7 +203,7 @@ browser-native overlays. Pages without graphics continue to avoid unnecessary ra
 ## Phase 6: Embedded font output
 
 Embedded font bytes collected by PDFium are now written as deterministic font assets and referenced by generated
-`@font-face` rules. Native glyph spans select their model font when embedded data is available, while fonts without
+`@font-face` rules. Native text runs select their model font when embedded data is available, while fonts without
 usable data retain the browser's sans-serif fallback. Text whose mapping or geometry is not proven safe for native
 reconstruction is reported as a structured conversion failure.
 
