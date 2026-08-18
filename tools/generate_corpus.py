@@ -77,6 +77,10 @@ def text(value, x=72, y=720, size=24, matrix=None):
     return "BT /F1 %d Tf %s Tm (%s) Tj ET" % (size, " ".join(map(str, matrix)), value)
 
 
+def layout_break():
+    return "BT /F1 24 Tf 1 0 0 1 72 720 Tm (A) Tj 100 0 Td (B) Tj ET"
+
+
 def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
     fixtures = {
@@ -89,6 +93,12 @@ def main():
             "width": 612, "height": 792,
             "content": text("A  B", 72, 720) + "\n" + text("C", 72, 680) + "\n" + text("wide", 72, 640),
         }],
+        "mixed-styles.pdf": [{
+            "width": 612,
+            "height": 792,
+            "content": text("Small", 72, 720, size=12) + "\n" + text("Large", 150, 720, size=30),
+        }],
+        "layout-breaks.pdf": [{"width": 612, "height": 792, "content": layout_break()}],
         "page-boxes.pdf": [
             {"width": 612, "height": 792, "crop_width": 500, "crop_height": 700, "content": text("Crop box page")},
             {"width": 400, "height": 400, "content": text("Second page", 40, 350)},

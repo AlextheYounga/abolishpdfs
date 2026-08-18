@@ -35,6 +35,24 @@
       "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
+      "id": "mixed-styles",
+      "path": "generated/mixed-styles.pdf",
+      "source": "generated",
+      "classifications": ["horizontal-text", "mixed-font-size", "layout-break"],
+      "expected": {"pages": 1, "text_objects_min": 2, "links": 0},
+      "clipboard": {"expected_text": "SmallLarge", "status": "pending"},
+      "screenshot": {"status": "pending"}
+    },
+    {
+      "id": "layout-breaks",
+      "path": "generated/layout-breaks.pdf",
+      "source": "generated",
+      "classifications": ["horizontal-text", "explicit-positioning", "layout-break"],
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0},
+      "clipboard": {"expected_text": "AB", "status": "pending"},
+      "screenshot": {"status": "pending"}
+    },
+    {
       "id": "page-boxes",
       "path": "generated/page-boxes.pdf",
       "source": "generated",
