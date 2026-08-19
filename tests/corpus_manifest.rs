@@ -18,6 +18,7 @@ struct Fixture {
     clipboard: Clipboard,
     navigation: Navigation,
     assets: Assets,
+    fonts: Option<Fonts>,
     screenshot: Screenshot,
 }
 
@@ -55,6 +56,14 @@ struct Assets {
 }
 
 #[derive(Deserialize)]
+struct Fonts {
+    source: Vec<String>,
+    embedded_count: usize,
+    processed_assets: Vec<String>,
+    processing: String,
+}
+
+#[derive(Deserialize)]
 struct Screenshot {
     status: String,
     baseline: Option<String>,
@@ -88,6 +97,13 @@ fn compatibility_manifest_has_explicit_classifications() {
         assert!(fixture.navigation.hrefs.iter().all(|href| href.starts_with("http")));
         assert!(fixture.navigation.fragments.iter().all(|fragment| fragment.starts_with("#page-")));
         assert!(fixture.assets.required.iter().all(|asset| !asset.contains("..")));
+        if fixture.classifications.iter().any(|classification| classification == "embedded-truetype") {
+            let fonts = fixture.fonts.as_ref().expect("embedded fixture needs font expectations");
+            assert_eq!(fonts.source.len(), fonts.embedded_count);
+            assert_eq!(fonts.processed_assets.len(), fonts.embedded_count);
+            assert_eq!(fonts.processing, "required");
+            assert!(fonts.processed_assets.iter().all(|asset| asset.ends_with(".woff2")));
+        }
         assert!(matches!(fixture.screenshot.status.as_str(), "capture-only" | "compare"));
         if fixture.screenshot.status == "compare" {
             assert!(fixture.screenshot.baseline.is_some());

@@ -219,11 +219,18 @@ Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures 
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.
 Their expected feature classifications and browser observations are stored in
 `tests/fixtures/manifest.json` and validated by `cargo test --test corpus_manifest`.
+Embedded-font fixtures are generated from the pinned Liberation Fonts 2.1.5
+TrueType files under `tests/fixtures/fonts/`; their license and checksums are
+recorded in `LICENSE-OFL.txt` and `PROVENANCE.md`. Generation is offline and
+does not inspect host font directories. The integrity gate is
+`python3 -m unittest tests/embedded_font_fixtures.py`, which verifies
+`FontFile2` TrueType signatures and byte-for-byte regeneration.
 
 The repeatable corpus gate is:
 
 ```text
 python3 tools/generate_corpus.py
+python3 -m unittest tests/embedded_font_fixtures.py
 cargo test --test corpus_manifest
 python3 tools/corpus.py validate
 python3 tools/corpus.py run --binary target/debug/abolishpdfs --pdfium /path/to/libpdfium.so

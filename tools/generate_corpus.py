@@ -3,9 +3,13 @@
 
 from pathlib import Path
 
+from embedded_font_pdf import graphics as font_graphics
+from embedded_font_pdf import make_pdf, spaced_text as font_spaced_text, text as font_text
+
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "tests" / "fixtures" / "generated"
+FONT_DIR = ROOT / "tests" / "fixtures" / "fonts"
 
 
 def pdf(pages):
@@ -21,8 +25,6 @@ def pdf(pages):
         content = page["content"].encode("ascii")
         content_id = len(objects) + 1
         objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content))
-        page_id = len(objects) + 1
-        page_ids.append(page_id)
         annots = b""
         if page.get("uri"):
             annotation_id = len(objects) + 1
@@ -30,6 +32,8 @@ def pdf(pages):
             objects.append(None)
             annots = b"%d 0 R" % annotation_id
         annots_part = b" /Annots [" + annots + b"]" if annots else b""
+        page_id = len(objects) + 1
+        page_ids.append(page_id)
         objects.append(
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %s %s] /CropBox [0 0 %s %s] /Resources << /Font << /F1 3 0 R >> /ExtGState << /GS1 4 0 R >> >> /Contents %d 0 R%s >>"
             % (
@@ -115,6 +119,66 @@ def main():
     }
     for name, pages in fixtures.items():
         (OUTPUT / name).write_bytes(pdf(pages))
+
+    sans = FONT_DIR / "LiberationSans-Regular.ttf"
+    serif = FONT_DIR / "LiberationSerif-Regular.ttf"
+    embedded_fixtures = {
+        "embedded-basic.pdf": make_pdf(
+            [(sans, "LiberationSans")],
+            [{"width": 612, "height": 792, "content": font_text(1, "Embedded TrueType text", 72, 720)}],
+        ),
+        "embedded-subset-name.pdf": make_pdf(
+            [(sans, "ABCDEF+LiberationSans")],
+            [{"width": 612, "height": 792, "content": font_text(1, "Subset-style font name", 72, 720)}],
+        ),
+        "embedded-multiple-fonts.pdf": make_pdf(
+            [(sans, "LiberationSans"), (serif, "LiberationSerif")],
+            [{
+                "width": 612,
+                "height": 792,
+                "content": font_text(1, "Sans text", 72, 720) + "\n" + font_text(2, "Serif text", 72, 660),
+            }],
+        ),
+        "embedded-size-transform.pdf": make_pdf(
+            [(sans, "LiberationSans")],
+            [{
+                "width": 612,
+                "height": 792,
+                "content": font_text(1, "Aa Aa", 72, 720, size=16)
+                + "\n"
+                + font_text(1, "Aa Aa", 72, 640, size=36)
+                + "\n"
+                + font_text(1, "Rotate", 0, 0, matrix=(0, 1, -1, 0, 260, 420)),
+            }],
+        ),
+        "embedded-vertical-slice.pdf": make_pdf(
+            [(sans, "LiberationSans")],
+            [
+                {
+                    "width": 612,
+                    "height": 792,
+                    "content": "\n".join([
+                        font_text(1, "Embedded font vertical slice", 72, 720, size=24),
+                        font_spaced_text(1, "Spacing", 72, 670, size=18),
+                        font_text(1, "Rotated", 0, 0, matrix=(0, 1, -1, 0, 300, 500)),
+                        font_graphics(),
+                    ]),
+                    "image": True,
+                    "uri": True,
+                },
+                {
+                    "width": 612,
+                    "height": 792,
+                    "content": "\n".join([
+                        font_text(1, "Second page", 72, 720, size=20),
+                        font_text(1, "Same font, different size", 72, 660, size=32),
+                    ]),
+                },
+            ],
+        ),
+    }
+    for name, data in embedded_fixtures.items():
+        (OUTPUT / name).write_bytes(data)
 
 
 if __name__ == "__main__":
