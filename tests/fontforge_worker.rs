@@ -2,7 +2,7 @@ use std::{path::Path, time::Duration};
 
 use abolishpdfs::{
     fonts::{FontForgeWorker, FontJobError, FontJobRequest, WorkerConfig},
-    model::FontSource,
+    model::{FontProcessingState, FontSource},
 };
 
 const HELPER: &str = env!("CARGO_BIN_EXE_fontforge_test_helper");
@@ -100,6 +100,6 @@ fn source() -> FontSource {
         data: Some(vec![0, 1, 0, 0]),
         used_unicode: vec!['A'],
         mapping_proven: true,
-        processed: None,
+        processing: FontProcessingState::Pending,
     }
 }

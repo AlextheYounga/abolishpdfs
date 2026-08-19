@@ -42,7 +42,20 @@ pub struct FontSource {
     pub data: Option<Vec<u8>>,
     pub used_unicode: Vec<char>,
     pub mapping_proven: bool,
-    pub processed: Option<ProcessedFont>,
+    pub processing: FontProcessingState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum FontProcessingState {
+    NotRequired,
+    Pending,
+    Ready(ProcessedFont),
+    Failed(FontProcessingFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FontProcessingFailure {
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,7 +80,7 @@ mod tests {
             data: Some(vec![1, 2, 3]),
             used_unicode: vec!['A'],
             mapping_proven: false,
-            processed: None,
+            processing: FontProcessingState::Pending,
         };
         let first = catalog.insert_or_get(source.clone());
         let second = catalog.insert_or_get(source);

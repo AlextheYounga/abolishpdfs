@@ -2,9 +2,9 @@ use std::fs;
 
 use super::*;
 use crate::model::{
-    AffineTransform, ClipState, FontCatalog, FontSource, Glyph, Point, ProcessedFont, RasterBackground,
-    ReconstructionDecision, Rect, RunOffset, Size, TextFailureReason, TextIntegrityFailure, TextObject,
-    VisibilityDecision,
+    AffineTransform, ClipState, FontCatalog, FontProcessingFailure, FontProcessingState, FontSource, Glyph, Point,
+    ProcessedFont, RasterBackground, ReconstructionDecision, Rect, RunOffset, Size, TextFailureReason,
+    TextIntegrityFailure, TextObject, VisibilityDecision,
 };
 use crate::text::prepare;
 
@@ -183,7 +183,7 @@ fn writer_embeds_fonts_and_assigns_native_glyphs() {
         data: Some(vec![0, 1, 0, 0, 1]),
         used_unicode: vec!['A'],
         mapping_proven: true,
-        processed: Some(ProcessedFont {
+        processing: FontProcessingState::Ready(ProcessedFont {
             asset_name: "font-0.woff2".to_owned(),
             family_name: "pdf-font-0".to_owned(),
             data: vec![119, 79, 70, 50, 1],
@@ -196,6 +196,47 @@ fn writer_embeds_fonts_and_assigns_native_glyphs() {
     assert!(output.document_css.contains("@font-face{font-family:'pdf-font-0';src:url('assets/font-0.woff2');}"));
     assert!(output.assets.contains(&("font-0.woff2".to_owned(), vec![119, 79, 70, 50, 1])));
     assert!(output.index_html.contains("font-family:'pdf-font-0',sans-serif"));
+}
+
+#[test]
+fn failed_embedded_font_prevents_native_output_and_fallback() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut model = model_with_text("A");
+    model.pages[0].text_objects[0].glyphs[0].font = Some(0);
+    model.fonts.insert(FontSource {
+        name: "Embedded".to_owned(),
+        embedded: Some(true),
+        data: Some(vec![0, 1, 0, 0]),
+        used_unicode: vec!['A'],
+        mapping_proven: true,
+        processing: FontProcessingState::Failed(FontProcessingFailure { message: "worker failed".to_owned() }),
+    });
+    prepare(&mut model);
+
+    let output = HtmlWriter::render(&model);
+    assert!(!output.index_html.contains("data-source=\"4\""));
+
+    let error = HtmlWriter::write_to(&model, directory.path()).unwrap_err();
+    assert!(error.to_string().contains("FontProcessingFailed"));
+    assert!(!directory.path().join("index.html").exists());
+}
+
+#[test]
+fn non_embedded_font_keeps_system_font_output() {
+    let mut model = model_with_text("A");
+    model.pages[0].text_objects[0].glyphs[0].font = Some(0);
+    model.fonts.insert(FontSource {
+        name: "Helvetica".to_owned(),
+        embedded: Some(false),
+        data: None,
+        used_unicode: vec!['A'],
+        mapping_proven: false,
+        processing: FontProcessingState::NotRequired,
+    });
+    prepare(&mut model);
+
+    let output = HtmlWriter::render(&model);
+    assert!(output.index_html.contains("font-family:sans-serif"));
 }
 
 #[test]

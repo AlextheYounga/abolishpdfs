@@ -1,8 +1,8 @@
 use std::{fmt, fs, io, path::Path};
 
 use crate::model::{
-    Color, DocumentModel, FontCatalog, Link, LinkTarget, OutlineItem, PageModel, PreparedRun, RunOffset, RunPlacement,
-    TextIntegrityFailure, TextRenderMode,
+    Color, DocumentModel, FontCatalog, FontProcessingState, Link, LinkTarget, OutlineItem, PageModel, PreparedRun,
+    RunOffset, RunPlacement, TextIntegrityFailure, TextRenderMode,
 };
 use crate::text::projection::{self, css_number};
 
@@ -43,7 +43,7 @@ impl HtmlWriter {
             .collect::<Vec<_>>();
         let mut font_css = String::new();
         for font in model.fonts.fonts.values() {
-            let Some(processed) = font.processed.as_ref() else {
+            let FontProcessingState::Ready(processed) = &font.processing else {
                 continue;
             };
             font_css.push_str(&format!(
@@ -115,12 +115,14 @@ fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog) {
 
 fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog) {
     let fill = run.style.fill.unwrap_or(Color::BLACK);
-    let family = run
-        .style
-        .font
-        .and_then(|id| fonts.fonts.get(&id))
-        .and_then(|font| font.processed.as_ref())
-        .map_or_else(|| "sans-serif".to_owned(), |font| format!("'{}',sans-serif", font.family_name));
+    let family = match run.style.font.and_then(|id| fonts.fonts.get(&id)) {
+        None => "sans-serif".to_owned(),
+        Some(font) => match &font.processing {
+            FontProcessingState::NotRequired => "sans-serif".to_owned(),
+            FontProcessingState::Ready(processed) => format!("'{}',sans-serif", processed.family_name),
+            FontProcessingState::Pending | FontProcessingState::Failed(_) => return,
+        },
+    };
     let position = match run.placement {
         RunPlacement::Bounded { left, top } => format!("left:{}px;top:{}px;", css_number(left), css_number(top)),
         RunPlacement::Transformed { left, bottom, matrix } => format!(
