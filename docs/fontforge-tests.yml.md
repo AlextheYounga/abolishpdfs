@@ -1,3 +1,4 @@
+```yaml
 name: FontForge Worker Tests
 
 on:
