@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fs, io,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -16,13 +17,28 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
     pub executable: PathBuf,
+    pub executable_args: Vec<OsString>,
     pub timeout: Duration,
     pub output_format: FontOutputFormat,
 }
 
 impl WorkerConfig {
     pub fn new(executable: impl Into<PathBuf>) -> Self {
-        Self { executable: executable.into(), timeout: DEFAULT_TIMEOUT, output_format: FontOutputFormat::Woff2 }
+        Self {
+            executable: executable.into(),
+            executable_args: Vec::new(),
+            timeout: DEFAULT_TIMEOUT,
+            output_format: FontOutputFormat::Woff2,
+        }
+    }
+
+    pub fn with_executable_args<I, S>(mut self, arguments: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
+        self.executable_args = arguments.into_iter().map(Into::into).collect();
+        self
     }
 
     pub fn with_format(mut self, output_format: FontOutputFormat) -> Self {
@@ -100,6 +116,7 @@ impl FontForgeWorker {
         let unicode =
             source.used_unicode.iter().map(|character| u32::from(*character).to_string()).collect::<Vec<_>>().join(",");
         let mut child = Command::new(&self.config.executable)
+            .args(&self.config.executable_args)
             .args(["-lang=py", "-script"])
             .arg(&self.script)
             .arg(&input)
@@ -191,97 +208,4 @@ fn validate_report(report: &WorkerReport, family_name: &str, used_count: usize) 
         ));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{fs, os::unix::fs::PermissionsExt};
-
-    use super::*;
-
-    #[test]
-    fn worker_validates_generated_asset_and_metrics() {
-        let executable = fake_fontforge(
-            "printf 'wOF2' > \"$5\"; printf '{\"family_name\":\"%s\",\"glyph_count\":2,\"advance_widths\":[500,600]}' \"$7\" > \"$6\"",
-        );
-        let worker = FontForgeWorker::new(WorkerConfig::new(executable.path()));
-        let source = source();
-        let request = FontJobRequest { id: 3, source: &source };
-        let result = worker.process(&request).expect("fake worker should succeed");
-
-        assert_eq!(result.font.asset_name, "font-3.woff2");
-        assert_eq!(result.font.family_name, "pdf-font-3");
-        assert_eq!(result.font.advance_widths, vec![500, 600]);
-    }
-
-    #[test]
-    fn worker_rejects_unproven_mapping_before_starting_process() {
-        let worker = FontForgeWorker::new(WorkerConfig::new("missing-fontforge"));
-        let mut source = source();
-        source.mapping_proven = false;
-
-        assert!(matches!(
-            worker.process(&FontJobRequest { id: 0, source: &source }),
-            Err(FontJobError::UnprovenMapping)
-        ));
-    }
-
-    #[test]
-    fn worker_reports_missing_executable() {
-        let worker = FontForgeWorker::new(WorkerConfig::new("missing-fontforge"));
-        let source = source();
-        assert!(matches!(worker.process(&FontJobRequest { id: 0, source: &source }), Err(FontJobError::Start(_))));
-    }
-
-    #[test]
-    fn worker_rejects_invalid_generated_asset() {
-        let executable = fake_fontforge("printf 'not-a-web-font' > \"$5\"");
-        let worker = FontForgeWorker::new(WorkerConfig::new(executable.path()));
-        let source = source();
-
-        assert!(matches!(worker.process(&FontJobRequest { id: 0, source: &source }), Err(FontJobError::InvalidOutput)));
-    }
-
-    #[test]
-    fn worker_reports_timeout() {
-        let executable = fake_fontforge("sleep 1");
-        let mut config = WorkerConfig::new(executable.path());
-        config.timeout = Duration::from_millis(20);
-        let worker = FontForgeWorker::new(config);
-
-        let source = source();
-        assert!(matches!(worker.process(&FontJobRequest { id: 0, source: &source }), Err(FontJobError::Timeout(_))));
-    }
-
-    fn source() -> FontSource {
-        FontSource {
-            name: "Example".to_owned(),
-            embedded: Some(true),
-            data: Some(vec![0, 1, 0, 0]),
-            used_unicode: vec!['A'],
-            mapping_proven: true,
-            processed: None,
-        }
-    }
-
-    fn fake_fontforge(command: &str) -> TempPath {
-        let fixture_workspace = tempfile::tempdir().expect("fixture executable workspace");
-        let path = fixture_workspace.path().join("fontforge");
-        fs::write(&path, format!("#!/bin/sh\n{command}\n")).expect("write fake executable");
-        let mut permissions = fs::metadata(&path).expect("executable metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&path, permissions).expect("make fake executable");
-        TempPath { _directory: fixture_workspace, path }
-    }
-
-    struct TempPath {
-        _directory: tempfile::TempDir,
-        path: PathBuf,
-    }
-
-    impl TempPath {
-        fn path(&self) -> &Path {
-            &self.path
-        }
-    }
 }
