@@ -39,18 +39,22 @@
       "path": "generated/mixed-styles.pdf",
       "source": "generated",
       "classifications": ["horizontal-text", "mixed-font-size", "layout-break"],
-      "expected": {"pages": 1, "text_objects_min": 2, "links": 0},
-      "clipboard": {"expected_text": "SmallLarge", "status": "pending"},
-      "screenshot": {"status": "pending"}
+      "expected": {"pages": 1, "text_objects_min": 2, "links": 0, "native_text": ["Small", "Large"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "SmallLarge", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": []},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
       "id": "layout-breaks",
       "path": "generated/layout-breaks.pdf",
       "source": "generated",
       "classifications": ["horizontal-text", "explicit-positioning", "layout-break"],
-      "expected": {"pages": 1, "text_objects_min": 1, "links": 0},
-      "clipboard": {"expected_text": "AB", "status": "pending"},
-      "screenshot": {"status": "pending"}
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0, "native_text": ["A", "B"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "AB", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": []},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
       "id": "page-boxes",
@@ -83,6 +87,66 @@
       "clipboard": {"expected_text": "Clipped text", "status": "required"},
       "navigation": {"hrefs": [], "fragments": []},
       "assets": {"required": ["page-1.png"]},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
+    },
+    {
+      "id": "embedded-basic",
+      "path": "generated/embedded-basic.pdf",
+      "source": "generated",
+      "classifications": ["embedded-truetype", "horizontal-text", "selectable-text"],
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0, "native_text": ["Embedded TrueType text"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "Embedded TrueType text", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": ["font-0.woff2"]},
+      "fonts": {"source": ["LiberationSans-Regular.ttf"], "embedded_count": 1, "processed_assets": ["font-0.woff2"], "processing": "required"},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
+    },
+    {
+      "id": "embedded-subset-name",
+      "path": "generated/embedded-subset-name.pdf",
+      "source": "generated",
+      "classifications": ["embedded-truetype", "subset-name", "selectable-text"],
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0, "native_text": ["Subset-style font name"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "Subset-style font name", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": ["font-0.woff2"]},
+      "fonts": {"source": ["LiberationSans-Regular.ttf"], "embedded_count": 1, "processed_assets": ["font-0.woff2"], "processing": "required"},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
+    },
+    {
+      "id": "embedded-multiple-fonts",
+      "path": "generated/embedded-multiple-fonts.pdf",
+      "source": "generated",
+      "classifications": ["embedded-truetype", "multiple-fonts", "selectable-text"],
+      "expected": {"pages": 1, "text_objects_min": 2, "links": 0, "native_text": ["Sans text", "Serif text"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "Sans text", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": ["font-0.woff2", "font-1.woff2"]},
+      "fonts": {"source": ["LiberationSans-Regular.ttf", "LiberationSerif-Regular.ttf"], "embedded_count": 2, "processed_assets": ["font-0.woff2", "font-1.woff2"], "processing": "required"},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
+    },
+    {
+      "id": "embedded-size-transform",
+      "path": "generated/embedded-size-transform.pdf",
+      "source": "generated",
+      "classifications": ["embedded-truetype", "mixed-font-size", "rotation", "selectable-text"],
+      "expected": {"pages": 1, "text_objects_min": 3, "links": 0, "native_text": ["Aa Aa", "Rotate"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "Aa Aa", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": ["font-0.woff2"]},
+      "fonts": {"source": ["LiberationSans-Regular.ttf"], "embedded_count": 1, "processed_assets": ["font-0.woff2"], "processing": "required"},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
+    },
+    {
+      "id": "embedded-vertical-slice",
+      "path": "generated/embedded-vertical-slice.pdf",
+      "source": "generated",
+      "classifications": ["embedded-truetype", "multi-page", "explicit-spacing", "rotation", "image", "vector-shape", "uri-link"],
+      "expected": {"pages": 2, "text_objects_min": 4, "links": 1, "native_text": ["Embedded font vertical slice", "Spacing", "Rotated", "Second page", "Same font, different size"], "page_sizes": [{"width": 612, "height": 792}, {"width": 612, "height": 792}], "fallback": "background"},
+      "clipboard": {"expected_text": "Embedded font vertical slice", "status": "required"},
+      "navigation": {"hrefs": ["https://example.com/embedded-font-fixture"], "fragments": []},
+      "assets": {"required": ["font-0.woff2", "page-1.png"]},
+      "fonts": {"source": ["LiberationSans-Regular.ttf"], "embedded_count": 1, "processed_assets": ["font-0.woff2"], "processing": "required"},
       "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     }
   ],

@@ -34,6 +34,25 @@ def validate(manifest):
         for name in ("clipboard", "navigation", "assets", "screenshot"):
             if name not in fixture:
                 failures.append(f"{fixture['id']}: missing {name} expectations")
+        if "embedded-truetype" in fixture["classifications"]:
+            fonts = fixture.get("fonts")
+            if not fonts:
+                failures.append(f"{fixture['id']}: missing font expectations")
+            else:
+                sources = fonts.get("source", [])
+                assets = fonts.get("processed_assets", [])
+                if len(sources) != fonts.get("embedded_count"):
+                    failures.append(f"{fixture['id']}: font source count does not match embedded_count")
+                if len(assets) != fonts.get("embedded_count"):
+                    failures.append(f"{fixture['id']}: processed asset count does not match embedded_count")
+                if fonts.get("processing") != "required":
+                    failures.append(f"{fixture['id']}: font processing must be required")
+                for source in sources:
+                    if not (FIXTURES / "fonts" / source).is_file():
+                        failures.append(f"{fixture['id']}: missing source font {source}")
+                for asset in assets:
+                    if asset not in fixture["assets"]["required"]:
+                        failures.append(f"{fixture['id']}: processed asset {asset} is not required")
         screenshot = fixture.get("screenshot", {})
         if screenshot.get("status") not in {"capture-only", "compare"}:
             failures.append(f"{fixture['id']}: invalid screenshot status")
