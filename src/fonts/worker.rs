@@ -197,6 +197,8 @@ fn validate_report(report: &WorkerReport, family_name: &str, used_count: usize) 
 mod tests {
     use std::{fs, os::unix::fs::PermissionsExt};
 
+    use crate::model::FontProcessingState;
+
     use super::*;
 
     #[test]
@@ -260,7 +262,7 @@ mod tests {
             data: Some(vec![0, 1, 0, 0]),
             used_unicode: vec!['A'],
             mapping_proven: true,
-            processed: None,
+            processing: FontProcessingState::Pending,
         }
     }
 

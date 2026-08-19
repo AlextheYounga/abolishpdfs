@@ -81,6 +81,7 @@ pub enum ReconstructionDecision {
 pub enum TextFailureReason {
     MissingUnicode,
     UnprovenFontMapping,
+    FontProcessingFailed,
     MissingGeometry,
     UnsupportedRenderMode,
     ExtractionError,

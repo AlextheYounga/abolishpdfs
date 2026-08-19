@@ -5,8 +5,8 @@ use pdfium_render::prelude::*;
 use crate::fonts::mapping_is_proven;
 use crate::model::{
     AffineTransform, ClipState, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FontCatalog, FontId,
-    FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel, Point,
-    ReconstructionDecision, Rect, Size, TextFailureReason, TextIntegrityFailure, TextObject, TextRenderMode,
+    FontProcessingState, FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel,
+    Point, ReconstructionDecision, Rect, Size, TextFailureReason, TextIntegrityFailure, TextObject, TextRenderMode,
     VisibilityDecision,
 };
 use crate::text::{projection, visibility};
@@ -70,7 +70,7 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
             data: font.data().ok(),
             used_unicode: Vec::new(),
             mapping_proven: false,
-            processed: None,
+            processing: FontProcessingState::Pending,
         });
         font_ids.insert(font.name(), id);
     }
