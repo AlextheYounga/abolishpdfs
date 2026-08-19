@@ -241,6 +241,33 @@ Generated screenshots and diagnostic output should be kept outside tracked sourc
 Licensed upstream PDFs remain pending until provenance and redistribution terms are
 recorded.
 
+## Development runtime bootstrap
+
+The repeatable Linux x86_64 integration workflow is:
+
+```text
+./tools/bootstrap-runtime
+./tools/run-integration
+```
+
+`tools/runtime.toml` is the single source of truth for PDFium 7881, headless
+FontForge 20230101, and Playwright 1.52.0. The bootstrap stores managed PDFium,
+the Python environment, Chromium, generated HTML, and screenshots under ignored
+`.runtime/` paths. It verifies the PDFium checksum, the FontForge executable and
+worker invocation, and a real Playwright Chromium launch before integration starts.
+Python 3.11 or newer is required by the manifest reader.
+
+Set `ABOLISHPDFS_PDFIUM_PATH` or `ABOLISHPDFS_FONTFORGE_PATH` to use an explicit
+compatible local dependency instead of managed PDFium or PATH FontForge.
+Bootstrap failures identify the missing or incompatible dependency. Failures after
+bootstrap are converter or corpus failures and must not be reported as runtime
+installation failures.
+
+The integration command generates fixtures, runs Rust tests, validates and runs
+the diagnostic corpus, writes HTML for every generated fixture, and invokes the
+existing Playwright browser corpus checks. It does not claim conversion behavior
+is correct merely because the runtime installed successfully.
+
 ## Links
 - [pdf2htmlex](https://github.com/pdf2htmlex/pdf2htmlex)
 - [fontforge](https://github.com/fontforge/fontforge)

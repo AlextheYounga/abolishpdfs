@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(dirname "$here")"
+
+if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
+    printf 'BOOTSTRAP FAILURE: this bootstrap supports Linux x86_64 only.\n' >&2
+    exit 1
+fi
+
+fail() {
+    printf 'BOOTSTRAP FAILURE: %s\n' "$1" >&2
+    exit 1
+}
+
+for command in curl sha256sum tar realpath fc-match; do
+    command -v "$command" >/dev/null 2>&1 \
+        || fail "required host command is unavailable: $command"
+done
+python3 -c 'import tomllib' >/dev/null 2>&1 \
+    || fail "Python 3.11 or newer is required to read tools/runtime.toml"
+
+config="$(python3 "$here/runtime_config.py" shell)" \
+    || fail "could not read the runtime manifest"
+eval "$config"
+mkdir -p "$RUNTIME_DIRECTORY"
+
+verify_checksum() {
+    local archive="$1"
+    local observed
+    observed="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+    [[ "$observed" == "$PDFIUM_SHA256" ]] || fail "PDFium archive checksum mismatch: expected $PDFIUM_SHA256, got $observed"
+}
+
+managed_pdfium="$PDFIUM_DIRECTORY/$PDFIUM_LIBRARY_RELATIVE"
+if [[ -n "${ABOLISHPDFS_PDFIUM_PATH:-}" ]]; then
+    pdfium_path="$ABOLISHPDFS_PDFIUM_PATH"
+    [[ -f "$pdfium_path" ]] || fail "ABOLISHPDFS_PDFIUM_PATH does not point to a file: $pdfium_path"
+    pdfium_path="$(realpath -e "$pdfium_path")"
+else
+    archive="$RUNTIME_DIRECTORY/pdfium-linux-x64.tgz"
+    if [[ ! -f "$managed_pdfium" ]]; then
+        printf 'Downloading PDFium %s...\n' "$PDFIUM_VERSION"
+        curl --fail --location --retry 3 --output "$archive.part" "$PDFIUM_URL" \
+            || fail "could not download PDFium $PDFIUM_VERSION from $PDFIUM_URL"
+        verify_checksum "$archive.part"
+        mv "$archive.part" "$archive"
+        extraction="$(mktemp -d "$RUNTIME_DIRECTORY/pdfium.XXXXXX")"
+        tar --extract --gzip --file "$archive" --directory "$extraction" \
+            || fail "could not extract the verified PDFium archive"
+        rm -rf "$PDFIUM_DIRECTORY"
+        mv "$extraction" "$PDFIUM_DIRECTORY"
+    else
+        [[ -f "$archive" ]] \
+            || fail "managed PDFium is present but its verified archive is missing: $archive"
+        verify_checksum "$archive"
+    fi
+    [[ -f "$managed_pdfium" ]] || fail "PDFium archive does not contain $PDFIUM_LIBRARY_RELATIVE"
+    pdfium_path="$managed_pdfium"
+fi
+
+fontforge_path="${ABOLISHPDFS_FONTFORGE_PATH:-}"
+if [[ -z "$fontforge_path" ]]; then
+    fontforge_path="$(command -v fontforge || true)"
+fi
+[[ -n "$fontforge_path" && -x "$fontforge_path" ]] \
+    || fail "FontForge $FONTFORGE_VERSION was not found; install headless FontForge or set ABOLISHPDFS_FONTFORGE_PATH"
+fontforge_path="$(realpath -e "$fontforge_path")"
+fontforge_version="$($fontforge_path -version 2>&1 || true)"
+[[ "$fontforge_version" == *"$FONTFORGE_VERSION"* ]] \
+    || fail "FontForge version check failed: expected $FONTFORGE_VERSION from $fontforge_path, got: $fontforge_version"
+
+font_input="$(fc-match -f '%{file}\n' sans 2>/dev/null | head -n 1 || true)"
+[[ -f "$font_input" ]] || fail "fc-match could not locate a TrueType font for the FontForge worker check"
+font_job="$(mktemp -d "$RUNTIME_DIRECTORY/fontforge-check.XXXXXX")"
+if ! "$fontforge_path" -lang=py -script "$root/tools/fontforge_worker.py" \
+    "$font_input" "$font_job/check.woff2" "$font_job/response.json" runtime-check 65 \
+    >"$font_job/stdout" 2>"$font_job/stderr"; then
+    printf '%s\n' "$(<"$font_job/stderr")" >&2
+    rm -rf "$font_job"
+    fail "FontForge headless worker check failed for $fontforge_path"
+fi
+[[ -s "$font_job/check.woff2" && -s "$font_job/response.json" ]] \
+    || fail "FontForge headless worker produced no validated output"
+rm -rf "$font_job"
+
+python_bin="$PYTHON_DIRECTORY/bin/python"
+if [[ ! -x "$python_bin" ]]; then
+    python3 -m venv "$PYTHON_DIRECTORY" \
+        || fail "could not create the Python virtual environment at $PYTHON_DIRECTORY"
+fi
+"$python_bin" -m pip install --disable-pip-version-check --upgrade "playwright==$PLAYWRIGHT_VERSION" \
+    || fail "could not install Playwright $PLAYWRIGHT_VERSION"
+export PLAYWRIGHT_BROWSERS_PATH="$BROWSER_DIRECTORY"
+"$python_bin" -m playwright install chromium \
+    || fail "could not install the Chromium browser for Playwright $PLAYWRIGHT_VERSION"
+"$python_bin" -c 'from playwright.sync_api import sync_playwright
+with sync_playwright() as playwright:
+    browser = playwright.chromium.launch()
+    browser.close()' \
+    || fail "Playwright $PLAYWRIGHT_VERSION could not launch its installed Chromium browser"
+
+cat >"$RUNTIME_DIRECTORY/runtime.env" <<EOF
+PDFIUM_PATH=$(printf '%q' "$pdfium_path")
+FONTFORGE_PATH=$(printf '%q' "$fontforge_path")
+PLAYWRIGHT_PYTHON=$(printf '%q' "$python_bin")
+PLAYWRIGHT_BROWSERS_PATH=$(printf '%q' "$BROWSER_DIRECTORY")
+export PDFIUM_PATH FONTFORGE_PATH PLAYWRIGHT_PYTHON PLAYWRIGHT_BROWSERS_PATH
+EOF
+
+printf 'Runtime bootstrap verified PDFium %s, FontForge %s, and Playwright %s.\n' \
+    "$PDFIUM_VERSION" "$FONTFORGE_VERSION" "$PLAYWRIGHT_VERSION"

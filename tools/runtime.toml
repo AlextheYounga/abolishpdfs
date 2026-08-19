@@ -1,0 +1,17 @@
+[versions]
+pdfium = "7881"
+fontforge = "20230101"
+playwright = "1.52.0"
+
+[pdfium]
+url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/pdfium-linux-x64.tgz"
+sha256 = "1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d"
+library = "lib/libpdfium.so"
+
+[runtime]
+directory = ".runtime"
+pdfium_directory = "pdfium-7881"
+python_directory = "python"
+browser_directory = "browsers"
+integration_directory = "integration-output"
+screenshot_directory = "corpus-screenshots"

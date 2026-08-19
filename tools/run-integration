@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(dirname "$here")"
+
+cd "$root"
+
+"$here/bootstrap-runtime"
+source "$root/.runtime/runtime.env"
+config="$(python3 "$here/runtime_config.py" shell)" \
+    || { printf 'BOOTSTRAP FAILURE: could not read the runtime manifest.\n' >&2; exit 1; }
+eval "$config"
+
+export ABOLISHPDFS_PDFIUM_PATH="$PDFIUM_PATH"
+export ABOLISHPDFS_FONTFORGE_PATH="$FONTFORGE_PATH"
+export PLAYWRIGHT_BROWSERS_PATH="$BROWSER_DIRECTORY"
+
+cargo build
+python3 "$root/tools/generate_corpus.py"
+cargo test
+python3 "$root/tools/corpus.py" validate
+python3 "$root/tools/corpus.py" run --binary "$root/target/debug/abolishpdfs" --pdfium "$PDFIUM_PATH"
+
+rm -rf "$INTEGRATION_DIRECTORY"
+mkdir -p "$INTEGRATION_DIRECTORY"
+while IFS= read -r fixture; do
+    fixture_id="${fixture%.pdf}"
+    mkdir -p "$INTEGRATION_DIRECTORY/$fixture_id"
+    "$root/target/debug/abolishpdfs" \
+        --pdfium-path "$PDFIUM_PATH" \
+        --fontforge-path "$FONTFORGE_PATH" \
+        --output "$INTEGRATION_DIRECTORY/$fixture_id" \
+        "$root/tests/fixtures/generated/$fixture"
+done < <(printf '%s\n' "$root"/tests/fixtures/generated/*.pdf | xargs -n 1 basename)
+
+"$PLAYWRIGHT_PYTHON" "$root/tools/browser_corpus.py" "$INTEGRATION_DIRECTORY" \
+    --screenshots "$SCREENSHOT_DIRECTORY"
+
+printf 'Integration run completed. Outputs: %s\n' "$INTEGRATION_DIRECTORY"
