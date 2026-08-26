@@ -10,6 +10,32 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests" / "fixtures" / "manifest.json"
 
 
+def select_native_text(page):
+    return page.evaluate("""
+        () => {
+            const runs = document.querySelectorAll('.text-run');
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            if (runs.length === 0) return '';
+            const range = document.createRange();
+            range.setStartBefore(runs[0]);
+            range.setEndAfter(runs[runs.length - 1]);
+            selection.addRange(range);
+            return selection.toString();
+        }
+    """)
+
+
+def loaded_font_faces(page):
+    page.evaluate("document.fonts.ready")
+    return page.evaluate("""
+        () => Array.from(document.fonts).map(face => ({
+            family: face.family.replace(/^['\"]|['\"]$/g, ''),
+            status: face.status,
+        }))
+    """)
+
+
 def check_fixture(page, fixture, output, screenshots):
     fixture_id = fixture["id"]
     expected = fixture["expected"]
@@ -19,7 +45,7 @@ def check_fixture(page, fixture, output, screenshots):
         result["failures"].append(f"missing {page_file}")
         return result
 
-    page.goto(page_file.resolve().as_uri())
+    page.goto(page_file.resolve().as_uri(), wait_until="load")
     pages = page.locator(".page")
     page_count = pages.count()
     result["page_count"] = page_count
@@ -33,13 +59,17 @@ def check_fixture(page, fixture, output, screenshots):
         result["failures"].append("output contains no pages")
         return result
 
-    native_text = "".join(page.locator(".text-glyph").all_inner_texts())
+    native_text = "".join(page.locator(".text-run").all_inner_texts())
     result["native_text"] = native_text
     for text in expected["native_text"]:
         if text not in native_text:
             result["failures"].append(f"native text is missing {text!r}")
 
-    page.keyboard.press("ControlOrMeta+A")
+    selected = select_native_text(page)
+    result["selected_text"] = selected
+    if fixture["clipboard"]["expected_text"] not in selected:
+        result["failures"].append("selected text does not contain the expected text")
+
     page.keyboard.press("ControlOrMeta+C")
     try:
         copied = page.evaluate("navigator.clipboard.readText()")
@@ -65,10 +95,20 @@ def check_fixture(page, fixture, output, screenshots):
     if missing_assets:
         result["failures"].append(f"missing assets: {', '.join(missing_assets)}")
 
+    font_faces = loaded_font_faces(page)
+    result["font_faces"] = font_faces
+    for asset in fixture.get("fonts", {}).get("processed_assets", []):
+        family = f"pdf-font-{Path(asset).stem.removeprefix('font-')}"
+        matching = [face for face in font_faces if face["family"] == family]
+        if not matching:
+            result["failures"].append(f"missing browser font face {family}")
+        elif not all(face["status"] == "loaded" for face in matching):
+            result["failures"].append(f"browser font face {family} did not load")
+
     screenshot = fixture["screenshot"]
     screenshot_file = screenshots / f"{fixture_id}-page-1.png"
     pages.first.screenshot(path=str(screenshot_file))
-    result["screenshot"] = str(screenshot_file.relative_to(ROOT))
+    result["screenshot"] = str(screenshot_file)
     if screenshot["status"] == "compare":
         result["screenshot_comparison"] = compare_screenshot(screenshot_file, ROOT / screenshot["baseline"], screenshot)
         if not result["screenshot_comparison"]["passed"]:

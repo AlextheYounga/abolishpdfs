@@ -53,6 +53,22 @@ def validate(manifest):
                 for asset in assets:
                     if asset not in fixture["assets"]["required"]:
                         failures.append(f"{fixture['id']}: processed asset {asset} is not required")
+        mapping = fixture.get("mapping")
+        if "adversarial-font-mapping" in fixture["classifications"]:
+            if not mapping:
+                failures.append(f"{fixture['id']}: missing adversarial mapping expectations")
+            else:
+                if mapping.get("status") != "known-mismatch":
+                    failures.append(f"{fixture['id']}: adversarial mapping status must be known-mismatch")
+                source_codes = mapping.get("source_codes", [])
+                if not source_codes or any(len(code) != 2 or any(character not in "0123456789abcdefABCDEF" for character in code) for code in source_codes):
+                    failures.append(f"{fixture['id']}: source_codes must contain two-digit hexadecimal codes")
+                if mapping.get("to_unicode_text") == mapping.get("visible_source_text"):
+                    failures.append(f"{fixture['id']}: adversarial semantic and visible text must differ")
+                if mapping.get("to_unicode_text") not in expected.get("native_text", []):
+                    failures.append(f"{fixture['id']}: native text must record the ToUnicode result")
+        elif mapping:
+            failures.append(f"{fixture['id']}: mapping expectations require adversarial-font-mapping classification")
         screenshot = fixture.get("screenshot", {})
         if screenshot.get("status") not in {"capture-only", "compare"}:
             failures.append(f"{fixture['id']}: invalid screenshot status")

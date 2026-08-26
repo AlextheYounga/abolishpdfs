@@ -50,6 +50,7 @@ class EmbeddedFontFixtureTests(unittest.TestCase):
         "embedded-subset-name.pdf": (1, {"ABCDEF+LiberationSans"}),
         "embedded-multiple-fonts.pdf": (2, {"LiberationSans", "LiberationSerif"}),
         "embedded-size-transform.pdf": (1, {"LiberationSans"}),
+        "embedded-tounicode-mismatch.pdf": (1, {"LiberationSans"}),
         "embedded-vertical-slice.pdf": (1, {"LiberationSans"}),
     }
 
@@ -66,6 +67,16 @@ class EmbeddedFontFixtureTests(unittest.TestCase):
         subprocess.run([sys.executable, str(GENERATOR)], check=True, cwd=ROOT)
         after = {filename: (GENERATED / filename).read_bytes() for filename in self.fixtures}
         self.assertEqual(before, after)
+
+    def test_tounicode_mismatch_preserves_adversarial_mapping(self):
+        pdf = (GENERATED / "embedded-tounicode-mismatch.pdf").read_bytes()
+        parsed = objects(pdf)
+        font = next(body for body in parsed.values() if b"/Subtype /TrueType" in body)
+        cmap_reference = re.search(rb"/ToUnicode (\d+) 0 R", font)
+        self.assertIsNotNone(cmap_reference)
+        cmap = parsed[int(cmap_reference.group(1))]
+        self.assertIn(b"<41> <0042>", cmap)
+        self.assertRegex(pdf, rb"BT /F1 24 Tf .* Tm \(A\) Tj ET")
 
 
 if __name__ == "__main__":

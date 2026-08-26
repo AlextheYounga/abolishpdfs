@@ -138,6 +138,19 @@
       "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
     },
     {
+      "id": "embedded-tounicode-mismatch",
+      "path": "generated/embedded-tounicode-mismatch.pdf",
+      "source": "generated",
+      "classifications": ["embedded-truetype", "adversarial-font-mapping", "tounicode-mismatch", "selectable-text"],
+      "expected": {"pages": 1, "text_objects_min": 1, "links": 0, "native_text": ["B"], "page_sizes": [{"width": 612, "height": 792}], "fallback": "none"},
+      "clipboard": {"expected_text": "B", "status": "required"},
+      "navigation": {"hrefs": [], "fragments": []},
+      "assets": {"required": ["font-0.woff2"]},
+      "fonts": {"source": ["LiberationSans-Regular.ttf"], "embedded_count": 1, "processed_assets": ["font-0.woff2"], "processing": "required"},
+      "mapping": {"status": "known-mismatch", "source_codes": ["41"], "to_unicode_text": "B", "visible_source_text": "A"},
+      "screenshot": {"status": "capture-only", "baseline": null, "max_diff_ratio": 0.02, "max_diff_pixels": 1000}
+    },
+    {
       "id": "embedded-vertical-slice",
       "path": "generated/embedded-vertical-slice.pdf",
       "source": "generated",

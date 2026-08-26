@@ -151,6 +151,11 @@ def main():
                 + font_text(1, "Rotate", 0, 0, matrix=(0, 1, -1, 0, 260, 420)),
             }],
         ),
+        "embedded-tounicode-mismatch.pdf": make_pdf(
+            [(sans, "LiberationSans")],
+            [{"width": 612, "height": 792, "content": font_text(1, "A", 72, 720)}],
+            to_unicode={1: {0x41: "B"}},
+        ),
         "embedded-vertical-slice.pdf": make_pdf(
             [(sans, "LiberationSans")],
             [

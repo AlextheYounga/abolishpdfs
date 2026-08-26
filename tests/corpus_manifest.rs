@@ -19,6 +19,7 @@ struct Fixture {
     navigation: Navigation,
     assets: Assets,
     fonts: Option<Fonts>,
+    mapping: Option<Mapping>,
     screenshot: Screenshot,
 }
 
@@ -64,6 +65,14 @@ struct Fonts {
 }
 
 #[derive(Deserialize)]
+struct Mapping {
+    status: String,
+    source_codes: Vec<String>,
+    to_unicode_text: String,
+    visible_source_text: String,
+}
+
+#[derive(Deserialize)]
 struct Screenshot {
     status: String,
     baseline: Option<String>,
@@ -103,6 +112,18 @@ fn compatibility_manifest_has_explicit_classifications() {
             assert_eq!(fonts.processed_assets.len(), fonts.embedded_count);
             assert_eq!(fonts.processing, "required");
             assert!(fonts.processed_assets.iter().all(|asset| asset.ends_with(".woff2")));
+        }
+        if fixture.classifications.iter().any(|classification| classification == "adversarial-font-mapping") {
+            let mapping = fixture.mapping.as_ref().expect("adversarial fixture needs mapping expectations");
+            assert_eq!(mapping.status, "known-mismatch");
+            assert!(!mapping.source_codes.is_empty());
+            assert!(mapping.source_codes.iter().all(|code| code.len() == 2 && u8::from_str_radix(code, 16).is_ok()));
+            assert!(!mapping.to_unicode_text.is_empty());
+            assert!(!mapping.visible_source_text.is_empty());
+            assert_ne!(mapping.to_unicode_text, mapping.visible_source_text);
+            assert!(fixture.expected.native_text.contains(&mapping.to_unicode_text));
+        } else {
+            assert!(fixture.mapping.is_none(), "{} has unexpected mapping expectations", fixture.id);
         }
         assert!(matches!(fixture.screenshot.status.as_str(), "capture-only" | "compare"));
         if fixture.screenshot.status == "compare" {

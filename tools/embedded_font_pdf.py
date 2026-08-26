@@ -125,16 +125,44 @@ class PdfBuilder:
         return bytes(output)
 
 
-def embedded_font(builder: PdfBuilder, font: TrueTypeFont) -> int:
+def to_unicode_cmap(mappings: dict[int, str]) -> bytes:
+    entries = "\n".join(f"<{code:02X}> <{ord(character):04X}>" for code, character in sorted(mappings.items()))
+    return (
+        "/CIDInit /ProcSet findresource begin\n"
+        "12 dict begin\n"
+        "begincmap\n"
+        "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+        "/CMapName /AbolishPdfsFixture def\n"
+        "/CMapType 2 def\n"
+        "1 begincodespacerange\n"
+        "<00> <FF>\n"
+        "endcodespacerange\n"
+        f"{len(mappings)} beginbfchar\n"
+        f"{entries}\n"
+        "endbfchar\n"
+        "endcmap\n"
+        "CMapName currentdict /CMap defineresource pop\n"
+        "end\n"
+        "end"
+    ).encode("ascii")
+
+
+def embedded_font(builder: PdfBuilder, font: TrueTypeFont, unicode_mappings: dict[int, str] | None = None) -> int:
     stream = builder.stream(b"<< /Length1 " + str(len(font.data)).encode(), font.data)
     descriptor = builder.add(
         f"<< /Type /FontDescriptor /FontName /{font.pdf_name} /Flags 32 /FontBBox [-1000 -300 2000 1100] "
         f"/ItalicAngle 0 /Ascent 900 /Descent -220 /CapHeight 700 /StemV 80 /FontFile2 {stream} 0 R >>".encode()
     )
     widths = " ".join(str(width) for width in font.widths())
+    to_unicode = b""
+    if unicode_mappings:
+        cmap = builder.stream(b"<<", to_unicode_cmap(unicode_mappings))
+        to_unicode = f" /ToUnicode {cmap} 0 R".encode()
     return builder.add(
         f"<< /Type /Font /Subtype /TrueType /BaseFont /{font.pdf_name} /FirstChar 32 /LastChar 126 "
-        f"/Widths [{widths}] /FontDescriptor {descriptor} 0 R /Encoding /WinAnsiEncoding >>".encode()
+        f"/Widths [{widths}] /FontDescriptor {descriptor} 0 R /Encoding /WinAnsiEncoding".encode()
+        + to_unicode
+        + b" >>"
     )
 
 
@@ -153,10 +181,15 @@ def uri_annotation(builder: PdfBuilder) -> tuple[int, int]:
     return action, annotation
 
 
-def make_pdf(font_paths: list[tuple[Path, str]], pages: list[dict]) -> bytes:
+def make_pdf(
+    font_paths: list[tuple[Path, str]],
+    pages: list[dict],
+    to_unicode: dict[int, dict[int, str]] | None = None,
+) -> bytes:
     builder = PdfBuilder()
     fonts = [TrueTypeFont(path, pdf_name) for path, pdf_name in font_paths]
-    font_ids = [embedded_font(builder, font) for font in fonts]
+    mappings = to_unicode or {}
+    font_ids = [embedded_font(builder, font, mappings.get(index)) for index, font in enumerate(fonts, start=1)]
     image_id = image(builder) if any(page.get("image") for page in pages) else None
     annotations = []
     for page in pages:
