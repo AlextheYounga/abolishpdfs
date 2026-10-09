@@ -2,10 +2,13 @@
 pdfium = "7881"
 fontforge = "20230101"
 playwright = "1.52.0"
+extension = "abext1"
 
 [pdfium]
-url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/pdfium-linux-x64.tgz"
-sha256 = "1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d"
+# The converter mandates the patched runtime produced by the PDFium fork. The
+# artifact and checksum must match a published PDFium release asset.
+artifact = "pdfium-linux-x64-chromium7881-abext1.tgz"
+sha256 = "04578049f55318b4d8d15f3d3f07b68084ae33e3fb49fd3caba387197925b62e"
 library = "lib/libpdfium.so"
 
 [runtime]

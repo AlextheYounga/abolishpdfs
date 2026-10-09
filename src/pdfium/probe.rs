@@ -4,6 +4,7 @@ use pdfium_render::prelude::*;
 use thiserror::Error;
 
 use super::PdfiumLibrary;
+use super::{PdfiumBindError, bind_runtime};
 
 use crate::pdfium::report::{
     CapabilityCharacter, CapabilityPage, CapabilityReport, FontCapability, FontMappingCapability, ObjectCapability,
@@ -14,8 +15,7 @@ pub struct CapabilityProbe;
 
 impl CapabilityProbe {
     pub fn inspect(input: &Path, library: &PdfiumLibrary) -> Result<CapabilityReport, CapabilityProbeError> {
-        let bindings = Pdfium::bind_to_library(library.path()).map_err(CapabilityProbeError::BindLibrary)?;
-        let pdfium = Pdfium::new(bindings);
+        let pdfium = bind_runtime(library).map_err(CapabilityProbeError::BindRuntime)?;
         let document = pdfium.load_pdf_from_file(input, None).map_err(CapabilityProbeError::OpenDocument)?;
 
         let mut pages = Vec::with_capacity(usize::try_from(document.pages().len()).unwrap_or_default());
@@ -52,7 +52,7 @@ impl CapabilityProbe {
             pdfium_library: library.path().display().to_string(),
             pdfium_bindings: "pdfium_7881",
             page_count: pages.len(),
-            font_mapping: FontMappingCapability::for_pdfium_render_0_9_3(),
+            font_mapping: FontMappingCapability::guaranteed(),
             pages,
         })
     }
@@ -61,7 +61,7 @@ impl CapabilityProbe {
 #[derive(Debug, Error)]
 pub enum CapabilityProbeError {
     #[error("could not bind PDFium: {0}")]
-    BindLibrary(PdfiumError),
+    BindRuntime(PdfiumBindError),
     #[error("could not open PDF document: {0}")]
     OpenDocument(PdfiumError),
     #[error("could not load page {index}: {source}")]

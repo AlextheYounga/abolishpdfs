@@ -7,10 +7,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
-use crate::model::{FontId, FontSource, ProcessedFont};
+use crate::{
+    fonts::glyph_name,
+    model::{FontId, FontSource, GlyphIdentity, ProcessedFont},
+};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -57,6 +60,74 @@ pub enum FontOutputFormat {
 pub struct FontJobRequest<'a> {
     pub id: FontId,
     pub source: &'a FontSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FontJobSpec {
+    pub family_name: String,
+    pub records: Vec<GlyphJobRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GlyphJobRecord {
+    pub unicode: char,
+    pub source_glyph_name: Option<String>,
+    pub source_code: Option<u32>,
+    pub source_glyph_id: Option<u16>,
+}
+
+impl FontJobSpec {
+    pub fn from_source(source: &FontSource, family_name: String) -> Self {
+        let mut records = Vec::new();
+        for identity in &source.used_identities {
+            let candidate = GlyphJobRecord::from_identity(identity, source.data.as_deref());
+            if let Some(existing) =
+                records.iter_mut().find(|record: &&mut GlyphJobRecord| record.unicode == candidate.unicode)
+            {
+                merge_record(existing, candidate);
+            } else {
+                records.push(candidate);
+            }
+        }
+        if records.is_empty() {
+            records = source
+                .used_unicode
+                .iter()
+                .map(|&unicode| GlyphJobRecord {
+                    unicode,
+                    source_glyph_name: None,
+                    source_code: None,
+                    source_glyph_id: None,
+                })
+                .collect();
+        }
+        Self { family_name, records }
+    }
+}
+
+impl GlyphJobRecord {
+    fn from_identity(identity: &GlyphIdentity, data: Option<&[u8]>) -> Self {
+        Self {
+            unicode: identity.unicode,
+            source_glyph_name: identity
+                .glyph_id
+                .and_then(|id| data.and_then(|bytes| glyph_name(bytes, id).ok().flatten()).map(str::to_owned)),
+            source_code: identity.source_code,
+            source_glyph_id: identity.glyph_id,
+        }
+    }
+}
+
+fn merge_record(existing: &mut GlyphJobRecord, candidate: GlyphJobRecord) {
+    if existing.source_glyph_name.is_none() {
+        existing.source_glyph_name = candidate.source_glyph_name;
+    }
+    if existing.source_code.is_none() {
+        existing.source_code = candidate.source_code;
+    }
+    if existing.source_glyph_id.is_none() {
+        existing.source_glyph_id = candidate.source_glyph_id;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,10 +182,14 @@ impl FontForgeWorker {
         let extension = self.config.output_format.extension();
         let output = workspace.path().join(format!("processed-font.{extension}"));
         let response = workspace.path().join("response.json");
-        fs::write(&input, data)?;
         let family_name = format!("pdf-font-{}", request.id);
-        let unicode =
-            source.used_unicode.iter().map(|character| u32::from(*character).to_string()).collect::<Vec<_>>().join(",");
+        let spec = FontJobSpec::from_source(source, family_name.clone());
+        let spec_path = workspace.path().join("request.json");
+        fs::write(&input, data)?;
+        fs::write(
+            &spec_path,
+            serde_json::to_vec(&spec).map_err(|error| FontJobError::InvalidResponse(error.to_string()))?,
+        )?;
         let mut child = Command::new(&self.config.executable)
             .args(&self.config.executable_args)
             .args(["-lang=py", "-script"])
@@ -122,8 +197,7 @@ impl FontForgeWorker {
             .arg(&input)
             .arg(&output)
             .arg(&response)
-            .arg(&family_name)
-            .arg(unicode)
+            .arg(&spec_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -152,7 +226,9 @@ impl FontForgeWorker {
             .map_err(|_| FontJobError::InvalidResponse("missing response file".to_owned()))?;
         let report: WorkerReport =
             serde_json::from_str(&response).map_err(|error| FontJobError::InvalidResponse(error.to_string()))?;
-        validate_report(&report, &family_name, source.used_unicode.len())?;
+        validate_report(&report, &spec)?;
+        let advances_by_unicode =
+            spec.records.iter().zip(&report.advance_widths).map(|(record, &width)| (record.unicode, width)).collect();
         Ok(FontJobResult {
             font: ProcessedFont {
                 asset_name: format!("font-{}.{}", request.id, extension),
@@ -160,6 +236,8 @@ impl FontForgeWorker {
                 data: bytes,
                 glyph_count: report.glyph_count,
                 advance_widths: report.advance_widths,
+                units_per_em: report.units_per_em,
+                advances_by_unicode,
             },
         })
     }
@@ -195,17 +273,22 @@ fn read_stream(mut stream: impl io::Read) -> io::Result<String> {
 struct WorkerReport {
     family_name: String,
     glyph_count: usize,
+    units_per_em: u16,
     advance_widths: Vec<u16>,
 }
 
-fn validate_report(report: &WorkerReport, family_name: &str, used_count: usize) -> Result<(), FontJobError> {
-    if report.family_name != family_name
-        || report.glyph_count < used_count
-        || report.advance_widths.len() != report.glyph_count
-    {
-        return Err(FontJobError::InvalidResponse(
-            "family, glyph count, or metrics do not match the request".to_owned(),
-        ));
+fn validate_report(report: &WorkerReport, spec: &FontJobSpec) -> Result<(), FontJobError> {
+    if report.family_name != spec.family_name {
+        return Err(FontJobError::InvalidResponse("family name does not match the request".to_owned()));
+    }
+    if report.glyph_count < spec.records.len() + 1 {
+        return Err(FontJobError::InvalidResponse("glyph count does not include notdef and all records".to_owned()));
+    }
+    if report.units_per_em == 0 {
+        return Err(FontJobError::InvalidResponse("units_per_em must be greater than zero".to_owned()));
+    }
+    if report.advance_widths.len() != spec.records.len() {
+        return Err(FontJobError::InvalidResponse("advance width count does not match request records".to_owned()));
     }
     Ok(())
 }

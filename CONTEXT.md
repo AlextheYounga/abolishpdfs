@@ -137,11 +137,11 @@ geometry and text-object association, decoded font-data availability, and a
 deactivate/render/reactivate bitmap check for text objects. A target-platform
 Milestone 1 run passes only when the report shows that suppressing active text
 changes the bitmap, reactivation restores the original bitmap, and no operation
-errors are reported. It also states the current public-API limitation: the
-configured PDFium bindings do not expose a per-character PDF-code or glyph-ID
-mapping. Font-dependent content must therefore remain a background fallback
-until the compatibility corpus proves a safe mapping or justifies a narrowly
-scoped PDFium extension.
+errors are reported. It also states the current public-API limitation of stock
+PDFium builds: no per-character PDF-code or glyph-ID mapping. Extraction probes
+the optional additive exports described in `patches/pdfium/`; when the loaded
+binary provides them, glyphs carry source character codes and glyph IDs, while
+stock binaries continue unchanged with the limitation reported.
 
 Milestone 2 adds the owned diagnostic converter. It can be exercised with:
 
@@ -204,8 +204,23 @@ browser-native overlays. Pages without graphics continue to avoid unnecessary ra
 
 Embedded font bytes collected by PDFium are now written as deterministic font assets and referenced by generated
 `@font-face` rules. Native text runs select their model font when embedded data is available, while fonts without
-usable data retain the browser's sans-serif fallback. Text whose mapping or geometry is not proven safe for native
-reconstruction is reported as a structured conversion failure.
+usable data retain the browser's sans-serif fallback. Text that cannot be
+reconstructed natively is reported as a structured conversion failure.
+
+## Phase 7: Glyph identity and glyph-driven fonts
+
+Extraction records optional per-character source identity (`source_code`,
+`glyph_id`) on glyphs and per-font identity triples, populated only when the
+loaded PDFium exports the additive identity functions documented in
+`patches/pdfium/`. FontForge jobs now receive a JSON request specification of
+semantic-Unicode slots carrying resolved PostScript names; with names present
+the worker moves source-drawn outlines onto their semantic slots, so misleading
+ToUnicode data can no longer change rendered shapes, and without names it falls
+back to codepoint subsetting identical to previous behavior. Responses report
+advances normalized by the processed font's units-per-em and aligned to request
+records; run compensation measures against these processed metrics first, then
+source bytes, then none. Text runs suppress browser kerning so spacing
+compensation stays deterministic across platforms.
 
 ## Visibility and failure policy
 

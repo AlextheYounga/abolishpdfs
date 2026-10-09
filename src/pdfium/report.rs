@@ -216,12 +216,14 @@ pub struct FontMappingCapability {
 }
 
 impl FontMappingCapability {
-    pub(crate) fn for_pdfium_render_0_9_3() -> Self {
+    /// The mandated patched runtime records every character identity; capability
+    /// reporting no longer negotiates optional exports.
+    pub(crate) const fn guaranteed() -> Self {
         Self {
             character_to_text_object: true,
-            character_to_glyph_id: false,
-            character_to_pdf_code: false,
-            note: "pdfium-render 0.9.3 exposes character-to-text-object association, but not a public character-to-glyph-ID or character-to-PDF-code mapping.",
+            character_to_glyph_id: true,
+            character_to_pdf_code: true,
+            note: "the mandated patched PDFium runtime records every character identity.",
         }
     }
 }
@@ -236,7 +238,7 @@ mod tests {
             pdfium_library: "/release/libpdfium.so".to_owned(),
             pdfium_bindings: "pdfium_7881",
             page_count: 1,
-            font_mapping: FontMappingCapability::for_pdfium_render_0_9_3(),
+            font_mapping: FontMappingCapability::guaranteed(),
             pages: vec![CapabilityPage {
                 number: 1,
                 width_points: 612.0,
@@ -289,6 +291,6 @@ mod tests {
         assert_eq!(json["pages"][0]["fonts"][0]["data_length"], 12_345);
         assert_eq!(json["pages"][0]["objects"][0]["kind"], "text");
         assert_eq!(json["pages"][0]["text_object_rendering"]["suppression_changed_bitmap"], true);
-        assert_eq!(json["font_mapping"]["character_to_glyph_id"], false);
+        assert_eq!(json["font_mapping"]["character_to_glyph_id"], true);
     }
 }

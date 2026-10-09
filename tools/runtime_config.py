@@ -26,9 +26,10 @@ def shell_values() -> dict[str, str]:
     runtime_directory = ROOT / runtime["directory"]
     return {
         "PDFIUM_VERSION": versions["pdfium"],
+        "PDFIUM_EXTENSION": versions["extension"],
         "FONTFORGE_VERSION": versions["fontforge"],
-        "PLAYWRIGHT_VERSION": versions["playwright"],
-        "PDFIUM_URL": pdfium["url"],
+        "PLAYWRIGHT_VERSION": manifest["versions"]["playwright"],
+        "PDFIUM_ARTIFACT": pdfium["artifact"],
         "PDFIUM_SHA256": pdfium["sha256"],
         "PDFIUM_LIBRARY_RELATIVE": pdfium["library"],
         "RUNTIME_DIRECTORY": str(runtime_directory),

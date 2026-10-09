@@ -136,6 +136,7 @@ mod tests {
             embedded: Some(true),
             data: Some(vec![0, 1, 0, 0]),
             used_unicode: vec!['A'],
+            used_identities: Vec::new(),
             mapping_proven: true,
             processing: FontProcessingState::Pending,
         });

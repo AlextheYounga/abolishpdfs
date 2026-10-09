@@ -5,6 +5,8 @@ mod runs;
 
 use crate::model::DocumentModel;
 
+pub const SPACING_MIN_PX: f32 = 1e-3;
+
 pub use runs::prepare_page;
 
 pub fn prepare(model: &mut DocumentModel) {

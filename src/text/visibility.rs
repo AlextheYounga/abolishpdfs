@@ -131,6 +131,8 @@ mod tests {
             paint_order,
             glyphs: vec![Glyph {
                 unicode: Some('A'),
+                source_code: None,
+                glyph_id: None,
                 font: Some(FontId::default()),
                 origin: Point { x: 10.0, y: 20.0 },
                 tight_bounds: bounds,

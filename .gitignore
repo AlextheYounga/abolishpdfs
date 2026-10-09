@@ -41,6 +41,10 @@ __trash__
 *.swp
 *.swo
 vendor
+!vendor/
+vendor/*
+!vendor/pdfium-render/
+!vendor/pdfium-render/**
 bin
 out
 .runtime

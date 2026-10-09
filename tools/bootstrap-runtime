@@ -38,26 +38,29 @@ if [[ -n "${ABOLISHPDFS_PDFIUM_PATH:-}" ]]; then
     pdfium_path="$ABOLISHPDFS_PDFIUM_PATH"
     [[ -f "$pdfium_path" ]] || fail "ABOLISHPDFS_PDFIUM_PATH does not point to a file: $pdfium_path"
     pdfium_path="$(realpath -e "$pdfium_path")"
-else
-    archive="$RUNTIME_DIRECTORY/pdfium-linux-x64.tgz"
+elif [[ -n "${PDFIUM_ARTIFACT_MIRROR:-}" && "${PDFIUM_ARTIFACT_MIRROR}" != "MISSING" ]]; then
+    pdfium_url="${PDFIUM_ARTIFACT_MIRROR%/}/$PDFIUM_ARTIFACT"
+    archive="$RUNTIME_DIRECTORY/$PDFIUM_ARTIFACT"
     if [[ ! -f "$managed_pdfium" ]]; then
-        printf 'Downloading PDFium %s...\n' "$PDFIUM_VERSION"
-        curl --fail --location --retry 3 --output "$archive.part" "$PDFIUM_URL" \
-            || fail "could not download PDFium $PDFIUM_VERSION from $PDFIUM_URL"
+        printf 'Downloading patched PDFium %s (%s)...\n' "$PDFIUM_VERSION" "$PDFIUM_EXTENSION"
+        curl --fail --location --retry 3 --output "$archive.part" "$pdfium_url" \
+            || fail "could not download the patched PDFium artifact from $pdfium_url"
         verify_checksum "$archive.part"
         mv "$archive.part" "$archive"
         extraction="$(mktemp -d "$RUNTIME_DIRECTORY/pdfium.XXXXXX")"
         tar --extract --gzip --file "$archive" --directory "$extraction" \
-            || fail "could not extract the verified PDFium archive"
+            || fail "could not extract the verified PDFium artifact"
         rm -rf "$PDFIUM_DIRECTORY"
         mv "$extraction" "$PDFIUM_DIRECTORY"
     else
-        [[ -f "$archive" ]] \
-            || fail "managed PDFium is present but its verified archive is missing: $archive"
         verify_checksum "$archive"
     fi
-    [[ -f "$managed_pdfium" ]] || fail "PDFium archive does not contain $PDFIUM_LIBRARY_RELATIVE"
+    [[ -f "$managed_pdfium" ]] || fail "PDFium artifact does not contain $PDFIUM_LIBRARY_RELATIVE"
     pdfium_path="$managed_pdfium"
+else
+    fail "no patched PDFium runtime is installed. Build one with \
+../abolishpdfs-pdfium-build/scripts/build-pdfium.sh and set ABOLISHPDFS_PDFIUM_PATH, \
+or publish the artifact and set PDFIUM_ARTIFACT_MIRROR."
 fi
 
 fontforge_path="${ABOLISHPDFS_FONTFORGE_PATH:-}"
@@ -74,8 +77,9 @@ fontforge_version="$($fontforge_path -version 2>&1 || true)"
 font_input="$(fc-match -f '%{file}\n' sans 2>/dev/null | head -n 1 || true)"
 [[ -f "$font_input" ]] || fail "fc-match could not locate a TrueType font for the FontForge worker check"
 font_job="$(mktemp -d "$RUNTIME_DIRECTORY/fontforge-check.XXXXXX")"
+printf '%s\n' '{"family_name":"runtime-check","records":[{"unicode":"A","source_glyph_name":null,"source_code":null,"source_glyph_id":null}]}' >"$font_job/request.json"
 if ! "$fontforge_path" -lang=py -script "$root/tools/fontforge_worker.py" \
-    "$font_input" "$font_job/check.woff2" "$font_job/response.json" runtime-check 65 \
+    "$font_input" "$font_job/check.woff2" "$font_job/response.json" "$font_job/request.json" \
     >"$font_job/stdout" 2>"$font_job/stderr"; then
     printf '%s\n' "$(<"$font_job/stderr")" >&2
     rm -rf "$font_job"

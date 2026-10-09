@@ -17,6 +17,12 @@ tempfile = "3.27.0"
 thiserror = "2.0.19"
 ttf-parser = "0.25.1"
 
+# The fork records source-document glyph identities through the patched PDFium
+# runtime. Pin the exact branch commit so clean builds do not depend on a local
+# sibling checkout.
+[patch.crates-io]
+pdfium-render = { git = "https://github.com/AlextheYounga/abolishpdfs-pdfium-render.git", rev = "ae0f2c26fe9c6c77d94f2037e5eecea3a5067a44" }
+
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
 suspicious = { level = "deny", priority = -1 }

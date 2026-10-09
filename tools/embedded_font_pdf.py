@@ -206,9 +206,9 @@ def make_pdf(
         resources = b"/Font << " + font_resources + b" >>"
         if image_id is not None and page.get("image"):
             resources += f" /XObject << /Im1 {image_id} 0 R >>".encode()
-        annots = b""
+        annots = ""
         if annotations[index] is not None:
-            annots = f" /Annots [{annotations[index]} 0 R]".encode()
+            annots = f" /Annots [{annotations[index]} 0 R]"
         page_ids.append(
             builder.add(
                 f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page['width']} {page['height']}] "
