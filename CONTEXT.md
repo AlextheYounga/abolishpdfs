@@ -290,6 +290,20 @@ the diagnostic corpus, writes HTML for every generated fixture, and invokes the
 existing Playwright browser corpus checks. It does not claim conversion behavior
 is correct merely because the runtime installed successfully.
 
+For a quick manual conversion of the included resume fixture, run:
+
+```text
+./run.sh
+```
+
+This uses the patched development PDFium checkout linked at
+`thirdparty/pdfium`, writes `out/alex-out/index.html`, and accepts an
+optional input PDF and output directory:
+
+```text
+./run.sh /path/to/document.pdf /path/to/output
+```
+
 ## Links
 - [pdf2htmlex](https://github.com/pdf2htmlex/pdf2htmlex)
 - [fontforge](https://github.com/fontforge/fontforge)
