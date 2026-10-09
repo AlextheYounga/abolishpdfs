@@ -270,6 +270,23 @@ Bootstrap failures identify the missing or incompatible dependency. Failures aft
 bootstrap are converter or corpus failures and must not be reported as runtime
 installation failures.
 
+### Local native source checkouts
+
+Local working copies of the maintained PDFium components live under
+`thirdparty/`:
+
+```text
+thirdparty/
+├── pdfium/          # patched native PDFium fork and its runtime build tooling
+└── pdfium-render/   # Rust bindings fork with the glyph-identity API
+```
+
+These are developer-local symlinks and are intentionally ignored by this
+repository. They are useful for maintaining the native extension and its Rust
+bindings, but normal `abolishpdfs` builds must not require them: Cargo pins the
+published `pdfium-render` revision and the runtime bootstrap installs verified
+PDFium release artifacts.
+
 The integration command generates fixtures, runs Rust tests, validates and runs
 the diagnostic corpus, writes HTML for every generated fixture, and invokes the
 existing Playwright browser corpus checks. It does not claim conversion behavior
