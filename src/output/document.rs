@@ -4,7 +4,7 @@ use crate::model::{
     Color, DocumentModel, FontCatalog, FontProcessingState, Link, LinkTarget, OutlineItem, PageModel, PreparedRun,
     RunOffset, RunPlacement, TextIntegrityFailure, TextRenderMode,
 };
-use crate::text::projection::{self, css_number};
+use crate::text::{SPACING_MIN_PX, projection::css_number};
 
 const DOCUMENT_CSS: &str = r#":root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -135,13 +135,13 @@ fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog) {
             css_number(matrix[3])
         ),
     };
-    let spacing = if run.letter_spacing.abs() > projection::EPSILON {
+    let spacing = if run.letter_spacing.abs() > SPACING_MIN_PX {
         format!("letter-spacing:{}px;", css_number(run.letter_spacing))
     } else {
         String::new()
     };
     html.push_str(&format!(
-        "<span class=\"text-run\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};{spacing}{}\">{}</span>",
+        "<span class=\"text-run\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};font-kerning:none;{spacing}{}\">{}</span>",
         run.source,
         css_number(run.style.font_size),
         css_color(fill),

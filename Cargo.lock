@@ -617,8 +617,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "pdfium-render"
 version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "826f8f64bc88cb15381cbb5aa245c1500632cd8a453b244bc2b0cbaff7098077"
+source = "git+https://github.com/AlextheYounga/abolishpdfs-pdfium-render.git?rev=ae0f2c26fe9c6c77d94f2037e5eecea3a5067a44#ae0f2c26fe9c6c77d94f2037e5eecea3a5067a44"
 dependencies = [
  "bitflags 2.13.1",
  "bytemuck",

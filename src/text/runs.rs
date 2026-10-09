@@ -1,6 +1,6 @@
 use crate::model::{
-    AffineTransform, FontCatalog, Glyph, PageModel, PreparedRun, ReconstructionDecision, RunOffset, RunPlacement,
-    RunStyle, TextObject,
+    AffineTransform, FontCatalog, FontProcessingState, Glyph, PageModel, PreparedRun, ReconstructionDecision,
+    RunOffset, RunPlacement, RunStyle, TextObject,
 };
 use ttf_parser::Face;
 
@@ -183,16 +183,22 @@ fn measured_compensation(
 
 fn natural_advance(glyph: &Glyph, character: char, transform: TransformClass, fonts: &FontCatalog) -> Option<f32> {
     let font_id = glyph.font?;
-    let data = fonts.fonts.get(&font_id)?.data.as_deref()?;
-    let face = Face::parse(data, 0).ok()?;
-    let glyph_id = face.glyph_index(character)?;
-    let advance = f32::from(face.glyph_hor_advance(glyph_id)?);
-    let units_per_em = f32::from(face.units_per_em());
+    let font = fonts.fonts.get(&font_id)?;
     let horizontal_scale = match transform {
         TransformClass::Identity => 1.0,
         TransformClass::Projected(projection) => projection.a.hypot(projection.b),
     };
-    Some(advance / units_per_em * glyph.font_size * horizontal_scale)
+    if let FontProcessingState::Ready(processed) = &font.processing {
+        if let Some(&units) = processed.advances_by_unicode.get(&character) {
+            return Some(f32::from(units) / f32::from(processed.units_per_em) * glyph.font_size * horizontal_scale);
+        }
+    }
+
+    let data = font.data.as_deref()?;
+    let face = Face::parse(data, 0).ok()?;
+    let glyph_id = face.glyph_index(character)?;
+    let advance = f32::from(face.glyph_hor_advance(glyph_id)?);
+    Some(advance / f32::from(face.units_per_em()) * glyph.font_size * horizontal_scale)
 }
 
 fn observed_advance(previous: &Glyph, next: &Glyph, transform: TransformClass) -> f32 {
@@ -211,86 +217,5 @@ fn observed_advance(previous: &Glyph, next: &Glyph, transform: TransformClass) -
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::{ClipState, Color, Point, Rect, Size, TextFailureReason, TextRenderMode, VisibilityDecision};
-
-    fn glyph(character: char, x: f32, y: f32) -> Glyph {
-        Glyph {
-            unicode: Some(character),
-            font: Some(1),
-            origin: Point { x, y },
-            tight_bounds: Some(Rect { left: x, bottom: y - 10.0, right: x + 8.0, top: y + 2.0 }),
-            loose_bounds: None,
-            transform: None,
-            font_size: 12.0,
-            fill: Some(Color::BLACK),
-            stroke: None,
-            generated_by_pdfium: Some(false),
-        }
-    }
-
-    fn object(glyphs: Vec<Glyph>) -> TextObject {
-        TextObject {
-            source: 4,
-            paint_order: 4,
-            glyphs,
-            font: 1,
-            render_mode: TextRenderMode::Fill,
-            reconstruction: ReconstructionDecision::NativeText,
-            visibility: VisibilityDecision::Visible,
-            clipping: ClipState::Unclipped,
-        }
-    }
-
-    fn page(text_object: TextObject) -> PageModel {
-        PageModel {
-            number: 1,
-            size: Size { width: 100.0, height: 100.0 },
-            crop_box: Rect { left: 0.0, bottom: 0.0, right: 100.0, top: 100.0 },
-            text_objects: vec![text_object],
-            prepared_runs: Vec::new(),
-            graphics: Vec::new(),
-            links: Vec::new(),
-            background: None,
-        }
-    }
-
-    #[test]
-    fn compatible_glyphs_form_one_run_in_source_order() {
-        let runs =
-            prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 18.0, 80.0)])), &FontCatalog::new());
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].text, "AB");
-        assert_eq!(runs[0].observed_advances, vec![8.0]);
-    }
-
-    #[test]
-    fn baseline_change_starts_a_new_run() {
-        let runs =
-            prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 18.0, 82.0)])), &FontCatalog::new());
-        assert_eq!(runs.len(), 2);
-    }
-
-    #[test]
-    fn large_horizontal_gap_starts_a_new_run() {
-        let runs =
-            prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 40.0, 80.0)])), &FontCatalog::new());
-        assert_eq!(runs.len(), 2);
-    }
-
-    #[test]
-    fn style_change_starts_a_new_run() {
-        let mut second = glyph('B', 18.0, 80.0);
-        second.fill = Some(Color { red: 255, green: 0, blue: 0, alpha: 255 });
-        let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), second])), &FontCatalog::new());
-        assert_eq!(runs.len(), 2);
-    }
-
-    #[test]
-    fn fallback_objects_do_not_form_native_runs() {
-        let mut text_object = object(vec![glyph('A', 10.0, 80.0)]);
-        text_object.reconstruction = ReconstructionDecision::TextFailure(TextFailureReason::MissingUnicode);
-        assert!(prepare_page(&page(text_object), &FontCatalog::new()).is_empty());
-    }
-}
+#[path = "runs_tests.rs"]
+mod tests;

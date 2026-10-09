@@ -5,15 +5,17 @@ use pdfium_render::prelude::*;
 use crate::fonts::mapping_is_proven;
 use crate::model::{
     AffineTransform, ClipState, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FontCatalog, FontId,
-    FontProcessingState, FontSource, Glyph, GraphicsKind, GraphicsObject, Link, LinkTarget, OutlineItem, PageModel,
-    Point, ReconstructionDecision, Rect, Size, TextFailureReason, TextIntegrityFailure, TextObject, TextRenderMode,
+    FontProcessingState, FontSource, Glyph, GlyphIdentity, GraphicsKind, GraphicsObject, Link, PageModel, Point,
+    ReconstructionDecision, Rect, Size, TextFailureReason, TextIntegrityFailure, TextObject, TextRenderMode,
     VisibilityDecision,
 };
 use crate::text::{projection, visibility};
 
 use super::PdfiumLibrary;
 use super::background::render_page_background;
+use super::navigation::{extract_outlines, link_target};
 use super::paint::{clip_state, paint_opacity};
+use super::{PdfiumBindError, bind_runtime};
 #[cfg(test)]
 #[path = "document_tests.rs"]
 mod tests;
@@ -22,8 +24,7 @@ pub struct DocumentExtractor;
 
 impl DocumentExtractor {
     pub fn extract(input: &Path, library: &PdfiumLibrary) -> Result<DocumentModel, DocumentExtractionError> {
-        let bindings = Pdfium::bind_to_library(library.path()).map_err(DocumentExtractionError::BindLibrary)?;
-        let pdfium = Pdfium::new(bindings);
+        let pdfium = bind_runtime(library).map_err(DocumentExtractionError::BindRuntime)?;
         let document = pdfium.load_pdf_from_file(input, None).map_err(DocumentExtractionError::OpenDocument)?;
         let mut model = DocumentModel {
             pages: Vec::with_capacity(usize::try_from(document.pages().len()).unwrap_or_default()),
@@ -69,6 +70,7 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
             embedded: font.is_embedded().ok(),
             data: font.data().ok(),
             used_unicode: Vec::new(),
+            used_identities: Vec::new(),
             mapping_proven: false,
             processing: FontProcessingState::Pending,
         });
@@ -253,6 +255,12 @@ fn extract_object(
 
 fn extract_glyph(character: &PdfPageTextChar<'_>, context: &mut ExtractionContext<'_, '_>) -> Glyph {
     let font_name = character.font_name();
+    // Generated characters (synthesized spaces and line breaks) legitimately have
+    // no source glyph; every real character must resolve through the patched
+    // runtime's mandatory extension.
+    let identity = character.glyph_identity().ok();
+    let source_code = identity.as_ref().map(PdfGlyphIdentity::character_code);
+    let glyph_id = identity.as_ref().and_then(|identity| u16::try_from(identity.glyph_id()).ok());
     if let Some(id) = context.font_ids.get(&font_name)
         && let Some(unicode) = character.unicode_char()
         && let Some(font) = context.model.fonts.fonts.get_mut(id)
@@ -260,9 +268,20 @@ fn extract_glyph(character: &PdfPageTextChar<'_>, context: &mut ExtractionContex
     {
         font.used_unicode.push(unicode);
     }
+    if let Some(id) = context.font_ids.get(&font_name)
+        && let Some(unicode) = character.unicode_char()
+        && let Some(font) = context.model.fonts.fonts.get_mut(id)
+    {
+        let identity = GlyphIdentity { unicode, source_code, glyph_id };
+        if !font.used_identities.contains(&identity) {
+            font.used_identities.push(identity);
+        }
+    }
     let origin = character.origin().ok();
     Glyph {
         unicode: character.unicode_char(),
+        source_code,
+        glyph_id,
         font: context.font_ids.get(&font_name).copied(),
         origin: origin.map_or(Point { x: 0.0, y: 0.0 }, |(x, y)| Point { x: x.value, y: y.value }),
         tight_bounds: character.tight_bounds().ok().map(rect),
@@ -303,56 +322,6 @@ fn first_font_id(model: &DocumentModel) -> FontId {
     model.fonts.fonts.keys().next().copied().unwrap_or(0)
 }
 
-fn link_target(link: &PdfLink<'_>) -> LinkTarget {
-    let Some(action) = link.action() else {
-        return link
-            .destination()
-            .and_then(|destination| destination.page_index().ok())
-            .and_then(|index| usize::try_from(index).ok())
-            .map_or(LinkTarget::Unknown, |index| LinkTarget::LocalDestination(index + 1));
-    };
-    if let Some(uri) = action.as_uri_action().and_then(|uri| uri.uri().ok()) {
-        return LinkTarget::Uri(uri);
-    }
-    if let Some(local) = action.as_local_destination_action() {
-        local
-            .destination()
-            .ok()
-            .and_then(|destination| destination.page_index().ok())
-            .and_then(|index| usize::try_from(index).ok())
-            .map_or(LinkTarget::Unknown, |index| LinkTarget::LocalDestination(index + 1))
-    } else if action.as_remote_destination_action().is_some() {
-        LinkTarget::RemoteDestination
-    } else {
-        LinkTarget::Unknown
-    }
-}
-
-fn extract_outlines(document: &PdfDocument<'_>) -> Vec<OutlineItem> {
-    let mut outlines = Vec::new();
-    let mut bookmark = document.bookmarks().root();
-    while let Some(current) = bookmark {
-        outlines.push(outline_item(&current));
-        bookmark = current.next_sibling();
-    }
-    outlines
-}
-
-fn outline_item(bookmark: &PdfBookmark<'_>) -> OutlineItem {
-    let mut children = Vec::new();
-    let mut child = bookmark.first_child();
-    while let Some(current) = child {
-        children.push(outline_item(&current));
-        child = current.next_sibling();
-    }
-    let target_page = bookmark
-        .destination()
-        .and_then(|destination| destination.page_index().ok())
-        .and_then(|index| usize::try_from(index).ok())
-        .map(|index| index + 1);
-    OutlineItem { title: bookmark.title().unwrap_or_else(|| "Untitled".to_owned()), target_page, children }
-}
-
 fn graphics_kind(object: &PdfPageObject<'_>) -> GraphicsKind {
     match object {
         PdfPageObject::Path(_) => GraphicsKind::Path,
@@ -389,7 +358,7 @@ fn color(value: PdfColor) -> Color {
 #[derive(Debug, thiserror::Error)]
 pub enum DocumentExtractionError {
     #[error("could not bind PDFium: {0}")]
-    BindLibrary(PdfiumError),
+    BindRuntime(PdfiumBindError),
     #[error("could not open PDF document: {0}")]
     OpenDocument(PdfiumError),
     #[error("could not load page {index}: {source}")]

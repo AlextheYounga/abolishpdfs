@@ -1,4 +1,4 @@
-use std::fs;
+use std::{collections::BTreeMap, fs};
 
 use super::*;
 use crate::model::{
@@ -6,7 +6,7 @@ use crate::model::{
     ProcessedFont, RasterBackground, ReconstructionDecision, Rect, RunOffset, Size, TextFailureReason,
     TextIntegrityFailure, TextObject, VisibilityDecision,
 };
-use crate::text::prepare;
+use crate::text::{SPACING_MIN_PX, prepare};
 
 fn model_with_text(text: &str) -> DocumentModel {
     let mut model = DocumentModel {
@@ -19,6 +19,8 @@ fn model_with_text(text: &str) -> DocumentModel {
                 paint_order: 4,
                 glyphs: vec![Glyph {
                     unicode: text.chars().next(),
+                    source_code: None,
+                    glyph_id: None,
                     font: None,
                     origin: Point { x: 72.0, y: 720.0 },
                     tight_bounds: Some(Rect { left: 72.0, bottom: 710.0, right: 84.0, top: 724.0 }),
@@ -116,7 +118,20 @@ fn writer_serializes_prepared_run_text_and_spacing() {
     assert_eq!(output.index_html.matches("class=\"text-run\"").count(), 1);
     assert!(output.index_html.contains(">A<span class=\"text-offset\""));
     assert!(output.index_html.contains("letter-spacing:1.25px;"));
+    assert!(output.index_html.contains("font-kerning:none;"));
     assert!(output.index_html.contains("class=\"text-offset\" aria-hidden=\"true\" style=\"margin-left:-0.5px\""));
+}
+
+#[test]
+fn writer_emits_letter_spacing_only_above_pixel_threshold() {
+    let mut model = model_with_text("A");
+    model.pages[0].prepared_runs[0].letter_spacing = SPACING_MIN_PX + 0.0001;
+    let output = HtmlWriter::render(&model);
+    assert!(output.index_html.contains("letter-spacing:0.0011px;"));
+
+    model.pages[0].prepared_runs[0].letter_spacing = SPACING_MIN_PX - 0.0001;
+    let output = HtmlWriter::render(&model);
+    assert!(!output.index_html.contains("letter-spacing:"));
 }
 
 #[test]
@@ -182,6 +197,7 @@ fn writer_embeds_fonts_and_assigns_native_glyphs() {
         embedded: Some(true),
         data: Some(vec![0, 1, 0, 0, 1]),
         used_unicode: vec!['A'],
+        used_identities: Vec::new(),
         mapping_proven: true,
         processing: FontProcessingState::Ready(ProcessedFont {
             asset_name: "font-0.woff2".to_owned(),
@@ -189,6 +205,8 @@ fn writer_embeds_fonts_and_assigns_native_glyphs() {
             data: vec![119, 79, 70, 50, 1],
             glyph_count: 2,
             advance_widths: vec![600, 600],
+            units_per_em: 1000,
+            advances_by_unicode: BTreeMap::new(),
         }),
     });
     prepare(&mut model);
@@ -208,6 +226,7 @@ fn failed_embedded_font_prevents_native_output_and_fallback() {
         embedded: Some(true),
         data: Some(vec![0, 1, 0, 0]),
         used_unicode: vec!['A'],
+        used_identities: Vec::new(),
         mapping_proven: true,
         processing: FontProcessingState::Failed(FontProcessingFailure { message: "worker failed".to_owned() }),
     });
@@ -230,6 +249,7 @@ fn non_embedded_font_keeps_system_font_output() {
         embedded: Some(false),
         data: None,
         used_unicode: vec!['A'],
+        used_identities: Vec::new(),
         mapping_proven: false,
         processing: FontProcessingState::NotRequired,
     });
