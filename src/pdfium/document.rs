@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path};
 
 use pdfium_render::prelude::*;
 
-use crate::fonts::mapping_is_proven;
+use crate::fonts::{identity_mapping_is_proven, mapping_is_proven};
 use crate::model::{
     AffineTransform, ClipState, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FontCatalog, FontId,
     FontProcessingState, FontSource, Glyph, GlyphIdentity, GraphicsKind, GraphicsObject, Link, PageModel, Point,
@@ -14,7 +14,7 @@ use crate::text::{projection, visibility};
 use super::PdfiumLibrary;
 use super::background::render_page_background;
 use super::navigation::{extract_outlines, link_target};
-use super::paint::{clip_state, paint_opacity};
+use super::paint::{clip_state, clip_state_with_bounds, paint_opacity};
 use super::{PdfiumBindError, bind_runtime};
 #[cfg(test)]
 #[path = "document_tests.rs"]
@@ -50,7 +50,9 @@ impl DocumentExtractor {
 
 fn prove_font_mappings(model: &mut DocumentModel) {
     for font in model.fonts.fonts.values_mut() {
-        font.mapping_proven = font.data.as_deref().is_some_and(|data| mapping_is_proven(data, &font.used_unicode));
+        font.mapping_proven = font.data.as_deref().is_some_and(|data| {
+            identity_mapping_is_proven(data, &font.used_identities) || mapping_is_proven(data, &font.used_unicode)
+        });
     }
 }
 
@@ -189,8 +191,6 @@ fn extract_object(
 ) -> Option<GraphicsObject> {
     let paint_order = *context.next_paint_order;
     *context.next_paint_order += 1;
-    let clipping = inherited_clipping || matches!(clip_state(object), ClipState::Clipped);
-
     if let PdfPageObject::Text(text) = object {
         let object_glyphs = match page_text {
             Some(text_page) => match text_page.chars_for_object(text) {
@@ -221,6 +221,8 @@ fn extract_object(
             glyph.transform = object_transform;
             glyph.font_size *= font_size_scale;
         }
+        let object_clip = clip_state_with_bounds(object, glyph_bounds(&object_glyphs));
+        let clipping = inherited_clipping || matches!(object_clip, ClipState::Clipped);
         let reconstruction = reconstruction_decision(&object_glyphs, font, render_mode, context.model);
         context.text_objects.push(TextObject {
             source: paint_order,
@@ -234,6 +236,8 @@ fn extract_object(
         });
         return None;
     }
+
+    let clipping = inherited_clipping || matches!(clip_state(object), ClipState::Clipped);
 
     let children = match object {
         PdfPageObject::XObjectForm(form) => {
@@ -250,6 +254,20 @@ fn extract_object(
         opacity: paint_opacity(object),
         clipping: if clipping { ClipState::Clipped } else { ClipState::Unclipped },
         children,
+    })
+}
+
+fn glyph_bounds(glyphs: &[Glyph]) -> Option<Rect> {
+    glyphs.iter().filter_map(|glyph| glyph.tight_bounds.or(glyph.loose_bounds)).fold(None, |bounds, glyph_bounds| {
+        Some(match bounds {
+            Some(current) => Rect {
+                left: current.left.min(glyph_bounds.left),
+                bottom: current.bottom.min(glyph_bounds.bottom),
+                right: current.right.max(glyph_bounds.right),
+                top: current.top.max(glyph_bounds.top),
+            },
+            None => glyph_bounds,
+        })
     })
 }
 
@@ -301,7 +319,9 @@ fn reconstruction_decision(
     model: &DocumentModel,
 ) -> ReconstructionDecision {
     if glyphs.is_empty() {
-        return ReconstructionDecision::TextFailure(TextFailureReason::ExtractionError);
+        // PDFium can expose empty text objects for spacing and positioning
+        // operators. They carry no semantic text to reproduce.
+        return ReconstructionDecision::NativeText;
     }
     if glyphs.iter().any(|glyph| glyph.unicode.is_none()) {
         return ReconstructionDecision::TextFailure(TextFailureReason::MissingUnicode);

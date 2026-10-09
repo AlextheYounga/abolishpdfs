@@ -61,6 +61,9 @@ fn collect_paint_objects(object: &GraphicsObject, inherited_clipping: bool, outp
 }
 
 fn text_visibility(text_object: &TextObject, paint_objects: &[PaintObject]) -> VisibilityDecision {
+    if text_object.glyphs.is_empty() {
+        return VisibilityDecision::Visible;
+    }
     if matches!(text_object.clipping, ClipState::Clipped) {
         return VisibilityDecision::AmbiguousVisibility;
     }
@@ -247,5 +250,14 @@ mod tests {
         let mut text_objects = vec![text(1, None)];
         analyze(&mut text_objects, &[]);
         assert_eq!(text_objects[0].visibility, VisibilityDecision::AmbiguousVisibility);
+    }
+
+    #[test]
+    fn empty_text_objects_are_visible() {
+        let mut text_objects = vec![text(1, None)];
+        text_objects[0].glyphs.clear();
+        analyze(&mut text_objects, &[]);
+        assert_eq!(text_objects[0].visibility, VisibilityDecision::Visible);
+        assert_eq!(text_objects[0].reconstruction, ReconstructionDecision::NativeText);
     }
 }

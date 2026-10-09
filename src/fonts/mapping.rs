@@ -1,3 +1,6 @@
+use crate::model::GlyphIdentity;
+use ttf_parser::Face;
+
 /// Proves that the Unicode values reported by PDFium are present in an
 /// embedded font's Unicode cmap.
 pub fn mapping_is_proven(data: &[u8], used: &[char]) -> bool {
@@ -5,6 +8,20 @@ pub fn mapping_is_proven(data: &[u8], used: &[char]) -> bool {
         return false;
     };
     used.iter().all(|character| glyph_index(cmap, u32::from(*character)).is_some_and(|glyph| glyph != 0))
+}
+
+/// Proves that PDFium's source glyph identities can be addressed by the
+/// FontForge worker. Identity-aware fonts may intentionally omit the Unicode
+/// cmap entry for a glyph, so the source glyph slot is the authoritative lookup.
+pub fn identity_mapping_is_proven(data: &[u8], identities: &[GlyphIdentity]) -> bool {
+    !identities.is_empty()
+        && identities.iter().all(|identity| {
+            identity.glyph_id.is_some_and(|glyph_id| {
+                glyph_id > 0
+                    && Face::parse(data, 0)
+                        .is_ok_and(|face| usize::from(glyph_id) < usize::from(face.number_of_glyphs()))
+            })
+        })
 }
 
 fn cmap_table(data: &[u8]) -> Option<&[u8]> {
@@ -36,6 +53,7 @@ fn glyph_index(cmap: &[u8], codepoint: u32) -> Option<u16> {
     }
 
     let mut best: Option<(u8, &[u8])> = None;
+    let mut best_nonzero = None;
     for record in cmap[4..records_end].chunks_exact(8) {
         let platform = read_u16(record, 0)?;
         let encoding = read_u16(record, 2)?;
@@ -46,8 +64,16 @@ fn glyph_index(cmap: &[u8], codepoint: u32) -> Option<u16> {
         if priority > best.map_or(0, |current| current.0) {
             best = Some((priority, subtable));
         }
+        if priority > 0
+            && glyph_index_in_subtable(subtable, codepoint).is_some_and(|glyph| glyph != 0)
+            && priority > best_nonzero.map_or(0, |current: (u8, u16)| current.0)
+        {
+            best_nonzero = Some((priority, glyph_index_in_subtable(subtable, codepoint)?));
+        }
     }
-    best.and_then(|(_, subtable)| glyph_index_in_subtable(subtable, codepoint))
+    best_nonzero
+        .map(|(_, glyph)| glyph)
+        .or_else(|| best.and_then(|(_, subtable)| glyph_index_in_subtable(subtable, codepoint)))
 }
 
 fn cmap_priority(platform: u16, encoding: u16, format: u8, codepoint: u32) -> u8 {
