@@ -9,6 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
+use ttf_parser::Face;
 
 use crate::{
     fonts::glyph_name,
@@ -101,6 +102,11 @@ impl FontJobSpec {
                 })
                 .collect();
         }
+        if !records.iter().any(|record| record.unicode == ' ') {
+            if let Some(space) = GlyphJobRecord::space(source.data.as_deref()) {
+                records.push(space);
+            }
+        }
         Self { family_name, records }
     }
 }
@@ -115,6 +121,18 @@ impl GlyphJobRecord {
             source_code: identity.source_code,
             source_glyph_id: identity.glyph_id,
         }
+    }
+
+    fn space(data: Option<&[u8]>) -> Option<Self> {
+        let data = data?;
+        let face = Face::parse(data, 0).ok()?;
+        let glyph_id = face.glyph_index(' ')?;
+        Some(Self {
+            unicode: ' ',
+            source_glyph_name: glyph_name(data, glyph_id.0).ok().flatten().map(str::to_owned),
+            source_code: None,
+            source_glyph_id: Some(glyph_id.0),
+        })
     }
 }
 
@@ -291,4 +309,52 @@ fn validate_report(report: &WorkerReport, spec: &FontJobSpec) -> Result<(), Font
         return Err(FontJobError::InvalidResponse("advance width count does not match request records".to_owned()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use super::*;
+    use crate::model::{FontProcessingState, GlyphIdentity};
+
+    fn source(identities: Vec<GlyphIdentity>) -> FontSource {
+        FontSource {
+            name: "Fixture".to_owned(),
+            embedded: Some(true),
+            data: fs::read(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fonts/LiberationSans-Regular.ttf"),
+            )
+            .ok(),
+            used_unicode: identities.iter().map(|identity| identity.unicode).collect(),
+            used_identities: identities,
+            mapping_proven: true,
+            processing: FontProcessingState::Pending,
+        }
+    }
+
+    #[test]
+    fn font_job_adds_one_space_without_replacing_source_glyph_identity() {
+        let source = source(vec![GlyphIdentity { unicode: 'A', source_code: Some(0x41), glyph_id: Some(36) }]);
+        assert!(source.data.is_some(), "Liberation Sans fixture is required");
+
+        let spec = FontJobSpec::from_source(&source, "fixture".to_owned());
+
+        assert_eq!(spec.records.iter().filter(|record| record.unicode == ' ').count(), 1);
+        assert!(spec.records.iter().any(|record| {
+            record.unicode == 'A' && record.source_code == Some(0x41) && record.source_glyph_id == Some(36)
+        }));
+    }
+
+    #[test]
+    fn font_job_does_not_duplicate_an_explicit_space_identity() {
+        let source = source(vec![GlyphIdentity { unicode: ' ', source_code: Some(0x20), glyph_id: Some(3) }]);
+        assert!(source.data.is_some(), "Liberation Sans fixture is required");
+
+        let spec = FontJobSpec::from_source(&source, "fixture".to_owned());
+
+        assert_eq!(spec.records.iter().filter(|record| record.unicode == ' ').count(), 1);
+        assert_eq!(spec.records[0].source_code, Some(0x20));
+        assert_eq!(spec.records[0].source_glyph_id, Some(3));
+    }
 }

@@ -1,3 +1,5 @@
+use std::mem;
+
 use crate::model::{
     AffineTransform, FontCatalog, FontProcessingState, Glyph, PageModel, PreparedRun, ReconstructionDecision,
     RunOffset, RunPlacement, RunStyle, TextObject,
@@ -19,33 +21,98 @@ enum TransformClass {
 }
 
 pub fn prepare_page(page: &PageModel, fonts: &FontCatalog) -> Vec<PreparedRun> {
-    page.text_objects.iter().flat_map(|object| prepare_object(page, object, fonts)).collect()
-}
-
-fn prepare_object(page: &PageModel, object: &TextObject, fonts: &FontCatalog) -> Vec<PreparedRun> {
-    if !matches!(object.reconstruction, ReconstructionDecision::NativeText) {
-        return Vec::new();
-    }
-
-    let glyphs = object.glyphs.iter().filter(|glyph| glyph.unicode.is_some()).collect::<Vec<_>>();
-    if glyphs.is_empty() {
-        return Vec::new();
-    }
-
     let mut runs = Vec::new();
-    let mut start = 0;
-    for end in 1..=glyphs.len() {
-        if end == glyphs.len() || !continues(&glyphs[start..end], glyphs[end]) {
-            runs.push(build_run(page, object, &glyphs[start..end], fonts));
-            start = end;
+    let mut builder = RunBuilder::default();
+
+    for object in &page.text_objects {
+        if !matches!(object.reconstruction, ReconstructionDecision::NativeText) {
+            if let Some(run) = builder.finish(page, fonts) {
+                runs.push(run);
+            }
+            continue;
         }
+        if object.glyphs.is_empty() {
+            builder.pending_space = !builder.characters.is_empty();
+            continue;
+        }
+
+        for glyph in object.glyphs.iter().filter(|glyph| glyph.unicode.is_some()) {
+            if builder.continues(glyph, object) {
+                if builder.pending_space {
+                    builder.push_semantic_space();
+                }
+                builder.push_glyph(glyph);
+            } else {
+                if let Some(run) = builder.finish(page, fonts) {
+                    runs.push(run);
+                }
+                builder.start(glyph, object);
+            }
+            builder.pending_space = false;
+        }
+    }
+
+    if let Some(run) = builder.finish(page, fonts) {
+        runs.push(run);
     }
     runs
 }
 
-fn continues(run: &[&Glyph], next: &Glyph) -> bool {
-    let first = run[0];
-    let previous = run[run.len() - 1];
+#[derive(Default)]
+struct RunBuilder<'a> {
+    object: Option<&'a TextObject>,
+    characters: Vec<RunCharacter<'a>>,
+    pending_space: bool,
+}
+
+#[derive(Clone, Copy)]
+struct RunCharacter<'a> {
+    glyph: &'a Glyph,
+    character: char,
+    semantic_space: bool,
+}
+
+impl<'a> RunBuilder<'a> {
+    fn continues(&self, glyph: &Glyph, object: &TextObject) -> bool {
+        let Some(first) = self.characters.first() else {
+            return false;
+        };
+        let Some(previous) = self.characters.iter().rev().find(|character| !character.semantic_space) else {
+            return false;
+        };
+        self.object.is_some_and(|first_object| first_object.render_mode == object.render_mode)
+            && continues(first.glyph, previous.glyph, glyph)
+    }
+
+    fn start(&mut self, glyph: &'a Glyph, object: &'a TextObject) {
+        self.object = Some(object);
+        self.characters =
+            vec![RunCharacter { glyph, character: glyph.unicode.unwrap_or_default(), semantic_space: false }];
+    }
+
+    fn push_glyph(&mut self, glyph: &'a Glyph) {
+        self.characters.push(RunCharacter {
+            glyph,
+            character: glyph.unicode.unwrap_or_default(),
+            semantic_space: false,
+        });
+    }
+
+    fn push_semantic_space(&mut self) {
+        if let Some(previous) = self.characters.last().copied() {
+            self.characters.push(RunCharacter { glyph: previous.glyph, character: ' ', semantic_space: true });
+        }
+    }
+
+    fn finish(&mut self, page: &PageModel, fonts: &FontCatalog) -> Option<PreparedRun> {
+        self.pending_space = false;
+        let object = self.object.take()?;
+        let characters = mem::take(&mut self.characters);
+        Some(build_run(page, object, &characters, fonts))
+    }
+}
+
+fn continues(first: &Glyph, previous: &Glyph, next: &Glyph) -> bool {
     if !same_style(first, next) {
         return false;
     }
@@ -109,8 +176,13 @@ fn projections_match(first: Projection, next: Projection) -> bool {
         && (first.d - next.d).abs() <= GEOMETRY_TOLERANCE
 }
 
-fn build_run(page: &PageModel, object: &TextObject, glyphs: &[&Glyph], fonts: &FontCatalog) -> PreparedRun {
-    let first = glyphs[0];
+fn build_run(
+    page: &PageModel,
+    object: &TextObject,
+    characters: &[RunCharacter<'_>],
+    fonts: &FontCatalog,
+) -> PreparedRun {
+    let first = characters[0].glyph;
     let transform = transform_class(first.transform.as_ref());
     let placement = match transform {
         TransformClass::Identity => {
@@ -139,15 +211,18 @@ fn build_run(page: &PageModel, object: &TextObject, glyphs: &[&Glyph], fonts: &F
             render_mode: object.render_mode,
         },
         placement,
-        observed_advances: glyphs.windows(2).map(|pair| observed_advance(pair[0], pair[1], transform)).collect(),
-        local_offsets: run_local_offsets(glyphs, transform, fonts),
-        letter_spacing: run_letter_spacing(glyphs, transform, fonts),
-        text: glyphs.iter().filter_map(|glyph| glyph.unicode).collect(),
+        observed_advances: characters
+            .windows(2)
+            .map(|pair| observed_advance(pair[0].glyph, pair[1].glyph, transform))
+            .collect(),
+        local_offsets: run_local_offsets(characters, transform, fonts),
+        letter_spacing: run_letter_spacing(characters, transform, fonts),
+        text: characters.iter().map(|character| character.character).collect(),
     }
 }
 
-fn run_letter_spacing(glyphs: &[&Glyph], transform: TransformClass, fonts: &FontCatalog) -> f32 {
-    let mut compensations = glyphs
+fn run_letter_spacing(characters: &[RunCharacter<'_>], transform: TransformClass, fonts: &FontCatalog) -> f32 {
+    let mut compensations = characters
         .windows(2)
         .filter_map(|pair| measured_compensation(pair[0], pair[1], transform, fonts))
         .collect::<Vec<_>>();
@@ -158,9 +233,13 @@ fn run_letter_spacing(glyphs: &[&Glyph], transform: TransformClass, fonts: &Font
     compensations[compensations.len() / 2]
 }
 
-fn run_local_offsets(glyphs: &[&Glyph], transform: TransformClass, fonts: &FontCatalog) -> Vec<RunOffset> {
-    let letter_spacing = run_letter_spacing(glyphs, transform, fonts);
-    glyphs
+fn run_local_offsets(
+    characters: &[RunCharacter<'_>],
+    transform: TransformClass,
+    fonts: &FontCatalog,
+) -> Vec<RunOffset> {
+    let letter_spacing = run_letter_spacing(characters, transform, fonts);
+    characters
         .windows(2)
         .enumerate()
         .filter_map(|(index, pair)| {
@@ -171,14 +250,13 @@ fn run_local_offsets(glyphs: &[&Glyph], transform: TransformClass, fonts: &FontC
 }
 
 fn measured_compensation(
-    previous: &Glyph,
-    next: &Glyph,
+    previous: RunCharacter<'_>,
+    next: RunCharacter<'_>,
     transform: TransformClass,
     fonts: &FontCatalog,
 ) -> Option<f32> {
-    let character = previous.unicode?;
-    let natural = natural_advance(previous, character, transform, fonts)?;
-    Some(observed_advance(previous, next, transform) - natural)
+    let natural = natural_advance(previous.glyph, previous.character, transform, fonts)?;
+    Some(observed_advance(previous.glyph, next.glyph, transform) - natural)
 }
 
 fn natural_advance(glyph: &Glyph, character: char, transform: TransformClass, fonts: &FontCatalog) -> Option<f32> {
