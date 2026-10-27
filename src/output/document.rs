@@ -72,48 +72,74 @@ impl HtmlWriter {
 }
 
 fn render_index(model: &DocumentModel) -> String {
-    let mut html = String::from(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>PDF</title><link rel=\"stylesheet\" href=\"document.css\"></head><body>",
-    );
+    let mut html = String::new();
+    render_line(&mut html, 0, "<!doctype html>");
+    render_line(&mut html, 0, "<html lang=\"en\">");
+    render_line(&mut html, 1, "<head>");
+    render_line(&mut html, 2, "<meta charset=\"utf-8\">");
+    render_line(&mut html, 2, "<title>PDF</title>");
+    render_line(&mut html, 2, "<link rel=\"stylesheet\" href=\"document.css\">");
+    render_line(&mut html, 1, "</head>");
+    render_line(&mut html, 1, "<body>");
     if !model.outlines.is_empty() {
-        html.push_str("<nav aria-label=\"Document outline\"><ol>");
+        render_line(&mut html, 2, "<nav aria-label=\"Document outline\">");
+        render_line(&mut html, 3, "<ol>");
         for item in &model.outlines {
-            render_outline_item(&mut html, item);
+            render_outline_item(&mut html, item, 4);
         }
-        html.push_str("</ol></nav>");
+        render_line(&mut html, 3, "</ol>");
+        render_line(&mut html, 2, "</nav>");
     }
-    html.push_str("<main id=\"page-container\" class=\"document\">");
+    render_line(&mut html, 2, "<main id=\"page-container\" class=\"document\">");
     for page in &model.pages {
-        render_page(&mut html, page, &model.fonts);
+        render_page(&mut html, page, &model.fonts, 3);
     }
-    html.push_str("</main></body></html>");
+    render_line(&mut html, 2, "</main>");
+    render_line(&mut html, 1, "</body>");
+    render_line(&mut html, 0, "</html>");
     html
 }
 
-fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog) {
-    let page_width = page.crop_box.right - page.crop_box.left;
-    let page_height = page.crop_box.top - page.crop_box.bottom;
-    html.push_str(&format!(
-        "<section id=\"page-{}\" class=\"page\" data-page-no=\"{}\" aria-label=\"Page {}\" style=\"width:{}px;height:{}px\"><div class=\"page-content\">",
-        page.number,
-        page.number,
-        page.number,
-        css_number(page_width),
-        css_number(page_height)
-    ));
-    if page.background.is_some() {
-        html.push_str(&format!("<img class=\"page-background\" alt=\"\" src=\"assets/page-{}.png\">", page.number));
-    }
-    for run in &page.prepared_runs {
-        render_run(html, run, fonts);
-    }
-    for link in &page.links {
-        render_link(html, page, link);
-    }
-    html.push_str("</div></section>");
+fn render_line(html: &mut String, depth: usize, content: &str) {
+    html.push_str(&"  ".repeat(depth));
+    html.push_str(content);
+    html.push('\n');
 }
 
-fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog) {
+fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog, depth: usize) {
+    let page_width = page.crop_box.right - page.crop_box.left;
+    let page_height = page.crop_box.top - page.crop_box.bottom;
+    render_line(
+        html,
+        depth,
+        &format!(
+            "<section id=\"page-{}\" class=\"page\" data-page-no=\"{}\" aria-label=\"Page {}\" style=\"width:{}px;height:{}px\">",
+            page.number,
+            page.number,
+            page.number,
+            css_number(page_width),
+            css_number(page_height)
+        ),
+    );
+    render_line(html, depth + 1, "<div class=\"page-content\">");
+    if page.background.is_some() {
+        render_line(
+            html,
+            depth + 2,
+            &format!("<img class=\"page-background\" alt=\"\" src=\"assets/page-{}.png\">", page.number),
+        );
+    }
+    for run in &page.prepared_runs {
+        render_run(html, run, fonts, depth + 2);
+    }
+    for link in &page.links {
+        render_link(html, page, link, depth + 2);
+    }
+    render_line(html, depth + 1, "</div>");
+    render_line(html, depth, "</section>");
+}
+
+fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog, depth: usize) {
     let fill = run.style.fill.unwrap_or(Color::BLACK);
     let family = match run.style.font.and_then(|id| fonts.fonts.get(&id)) {
         None => "sans-serif".to_owned(),
@@ -140,14 +166,18 @@ fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog) {
     } else {
         String::new()
     };
-    html.push_str(&format!(
-        "<span class=\"text-run\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};font-kerning:none;{spacing}{}\">{}</span>",
-        run.source,
-        css_number(run.style.font_size),
-        css_color(fill),
-        render_mode_style(run.style.render_mode, run.style.stroke),
-        render_run_text(&run.text, &run.local_offsets)
-    ));
+    render_line(
+        html,
+        depth,
+        &format!(
+            "<span class=\"text-run\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};font-kerning:none;{spacing}{}\">{}</span>",
+            run.source,
+            css_number(run.style.font_size),
+            css_color(fill),
+            render_mode_style(run.style.render_mode, run.style.stroke),
+            render_run_text(&run.text, &run.local_offsets)
+        ),
+    );
 }
 
 fn render_run_text(text: &str, offsets: &[RunOffset]) -> String {
@@ -166,24 +196,24 @@ fn render_run_text(text: &str, offsets: &[RunOffset]) -> String {
     rendered
 }
 
-fn render_outline_item(html: &mut String, item: &OutlineItem) {
-    html.push_str("<li>");
+fn render_outline_item(html: &mut String, item: &OutlineItem, depth: usize) {
+    render_line(html, depth, "<li>");
     if let Some(page) = item.target_page {
-        html.push_str(&format!("<a href=\"#page-{}\">{}</a>", page, escape_html(&item.title)));
+        render_line(html, depth + 1, &format!("<a href=\"#page-{}\">{}</a>", page, escape_html(&item.title)));
     } else {
-        html.push_str(&escape_html(&item.title));
+        render_line(html, depth + 1, &escape_html(&item.title));
     }
     if !item.children.is_empty() {
-        html.push_str("<ol>");
+        render_line(html, depth + 1, "<ol>");
         for child in &item.children {
-            render_outline_item(html, child);
+            render_outline_item(html, child, depth + 2);
         }
-        html.push_str("</ol>");
+        render_line(html, depth + 1, "</ol>");
     }
-    html.push_str("</li>");
+    render_line(html, depth, "</li>");
 }
 
-fn render_link(html: &mut String, page: &PageModel, link: &Link) {
+fn render_link(html: &mut String, page: &PageModel, link: &Link, depth: usize) {
     let left = link.bounds.left - page.crop_box.left;
     let top = page.crop_box.top - link.bounds.top;
     let width = link.bounds.right - link.bounds.left;
@@ -194,15 +224,19 @@ fn render_link(html: &mut String, page: &PageModel, link: &Link) {
         _ => String::new(),
     };
     let target_kind = link_target_kind(&link.target);
-    html.push_str(&format!(
-        "<a class=\"page-link\" aria-label=\"PDF link\" data-target=\"{}\"{} style=\"left:{}px;top:{}px;width:{}px;height:{}px\"></a>",
-        target_kind,
-        target,
-        css_number(left),
-        css_number(top),
-        css_number(width),
-        css_number(height)
-    ));
+    render_line(
+        html,
+        depth,
+        &format!(
+            "<a class=\"page-link\" aria-label=\"PDF link\" data-target=\"{}\"{} style=\"left:{}px;top:{}px;width:{}px;height:{}px\"></a>",
+            target_kind,
+            target,
+            css_number(left),
+            css_number(top),
+            css_number(width),
+            css_number(height)
+        ),
+    );
 }
 
 fn link_target_kind(target: &LinkTarget) -> &'static str {
