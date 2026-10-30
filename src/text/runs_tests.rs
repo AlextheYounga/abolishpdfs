@@ -37,11 +37,15 @@ fn object(glyphs: Vec<Glyph>) -> TextObject {
 }
 
 fn page(text_object: TextObject) -> PageModel {
+    page_objects(vec![text_object])
+}
+
+fn page_objects(text_objects: Vec<TextObject>) -> PageModel {
     PageModel {
         number: 1,
         size: Size { width: 100.0, height: 100.0 },
         crop_box: Rect { left: 0.0, bottom: 0.0, right: 100.0, top: 100.0 },
-        text_objects: vec![text_object],
+        text_objects,
         prepared_runs: Vec::new(),
         graphics: Vec::new(),
         links: Vec::new(),
@@ -77,6 +81,18 @@ fn compatible_glyphs_form_one_run_in_source_order() {
 }
 
 #[test]
+fn compatible_glyphs_merge_across_text_object_boundaries() {
+    let runs = prepare_page(
+        &page_objects(vec![object(vec![glyph('A', 10.0, 80.0)]), object(vec![glyph('B', 18.0, 80.0)])]),
+        &FontCatalog::new(),
+    );
+
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].text, "AB");
+    assert_eq!(runs[0].source, 4);
+}
+
+#[test]
 fn baseline_change_starts_a_new_run() {
     let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 18.0, 82.0)])), &FontCatalog::new());
     assert_eq!(runs.len(), 2);
@@ -94,6 +110,113 @@ fn style_change_starts_a_new_run() {
     second.fill = Some(Color { red: 255, green: 0, blue: 0, alpha: 255 });
     let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), second])), &FontCatalog::new());
     assert_eq!(runs.len(), 2);
+}
+
+#[test]
+fn protected_cross_object_boundaries_start_new_runs() {
+    let mut style = glyph('B', 18.0, 80.0);
+    style.fill = Some(Color { red: 255, green: 0, blue: 0, alpha: 255 });
+    let baseline = glyph('B', 18.0, 82.0);
+    let mut transformed = glyph('B', 18.0, 80.0);
+    transformed.transform = Some(AffineTransform { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: 0.0, f: 0.0 });
+    let mut stroke = object(vec![glyph('B', 18.0, 80.0)]);
+    stroke.render_mode = TextRenderMode::Stroke;
+    let large_gap = object(vec![glyph('B', 40.0, 80.0)]);
+
+    for second in [object(vec![style]), object(vec![baseline]), object(vec![transformed]), stroke, large_gap] {
+        let runs = prepare_page(&page_objects(vec![object(vec![glyph('A', 10.0, 80.0)]), second]), &FontCatalog::new());
+        assert_eq!(runs.len(), 2);
+    }
+
+    let backwards = prepare_page(
+        &page_objects(vec![object(vec![glyph('A', 18.0, 80.0)]), object(vec![glyph('B', 10.0, 80.0)])]),
+        &FontCatalog::new(),
+    );
+    assert_eq!(backwards.len(), 2);
+}
+
+#[test]
+fn transformed_reverse_progression_across_objects_starts_a_new_run() {
+    let transform = Some(AffineTransform { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: 0.0, f: 0.0 });
+    let mut first = glyph('A', 10.0, 18.0);
+    first.transform = transform;
+    let mut second = glyph('B', 10.0, 10.0);
+    second.transform = transform;
+
+    let runs = prepare_page(&page_objects(vec![object(vec![first]), object(vec![second])]), &FontCatalog::new());
+
+    assert_eq!(runs.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), vec!["A", "B"]);
+}
+
+#[test]
+fn non_native_objects_terminate_runs_and_discard_pending_spaces() {
+    let mut non_native = object(vec![glyph('?', 14.0, 80.0)]);
+    non_native.reconstruction = ReconstructionDecision::TextFailure(TextFailureReason::MissingUnicode);
+    let runs = prepare_page(
+        &page_objects(vec![
+            object(vec![glyph('A', 10.0, 80.0)]),
+            non_native.clone(),
+            object(vec![glyph('B', 18.0, 80.0)]),
+        ]),
+        &FontCatalog::new(),
+    );
+    assert_eq!(runs.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), vec!["A", "B"]);
+
+    let runs = prepare_page(
+        &page_objects(vec![
+            object(vec![glyph('A', 10.0, 80.0)]),
+            object(Vec::new()),
+            non_native,
+            object(vec![glyph('B', 18.0, 80.0)]),
+        ]),
+        &FontCatalog::new(),
+    );
+    assert_eq!(runs.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), vec!["A", "B"]);
+}
+
+#[test]
+fn empty_native_object_recovers_one_space_and_preserves_next_glyph_position() {
+    let processed = ProcessedFont {
+        asset_name: "fixture.woff2".to_owned(),
+        family_name: "fixture".to_owned(),
+        data: Vec::new(),
+        glyph_count: 3,
+        advance_widths: vec![1000, 1000],
+        units_per_em: 1000,
+        advances_by_unicode: BTreeMap::from([('A', 1000), (' ', 1000)]),
+    };
+    let mut first = glyph('A', 0.0, 80.0);
+    first.font = Some(0);
+    let mut second = glyph('B', 24.0, 80.0);
+    second.font = Some(0);
+    let runs = prepare_page(
+        &page_objects(vec![object(vec![first]), object(Vec::new()), object(vec![second])]),
+        &catalog_with_font(None, FontProcessingState::Ready(processed)),
+    );
+
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].text, "A B");
+    assert_eq!(runs[0].letter_spacing, 12.0);
+    assert_eq!(runs[0].local_offsets, vec![RunOffset { character_index: 1, amount: -24.0 }]);
+    assert_eq!(runs[0].observed_advances, vec![0.0, 24.0]);
+}
+
+#[test]
+fn empty_native_objects_at_run_boundaries_do_not_create_spaces() {
+    let mut styled = glyph('B', 18.0, 80.0);
+    styled.fill = Some(Color { red: 255, green: 0, blue: 0, alpha: 255 });
+    let runs = prepare_page(
+        &page_objects(vec![
+            object(Vec::new()),
+            object(vec![glyph('A', 10.0, 80.0)]),
+            object(Vec::new()),
+            object(vec![styled]),
+            object(Vec::new()),
+        ]),
+        &FontCatalog::new(),
+    );
+
+    assert_eq!(runs.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), vec!["A", "B"]);
 }
 
 #[test]

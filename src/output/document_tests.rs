@@ -123,6 +123,17 @@ fn writer_serializes_prepared_run_text_and_spacing() {
 }
 
 #[test]
+fn writer_indents_structure_without_whitespace_inside_escaped_run_text() {
+    let output = HtmlWriter::render(&model_with_text("<"));
+    let run_line = output.index_html.lines().find(|line| line.contains("class=\"text-run\"")).unwrap_or_default();
+
+    assert!(output.index_html.contains("\n  <body>\n"));
+    assert!(output.index_html.contains("\n          <span class=\"text-run\""));
+    assert!(run_line.ends_with(">&lt;</span>"));
+    assert!(!run_line.contains(">&lt;\n"));
+}
+
+#[test]
 fn writer_emits_letter_spacing_only_above_pixel_threshold() {
     let mut model = model_with_text("A");
     model.pages[0].prepared_runs[0].letter_spacing = SPACING_MIN_PX + 0.0001;
