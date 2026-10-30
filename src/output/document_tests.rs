@@ -119,6 +119,7 @@ fn writer_serializes_prepared_run_text_and_spacing() {
     assert!(output.index_html.contains(">A<span class=\"text-offset\""));
     assert!(output.index_html.contains("letter-spacing:1.25px;"));
     assert!(output.index_html.contains("font-kerning:none;"));
+    assert!(output.index_html.contains("font-kerning:none;font-variant-ligatures:none;"));
     assert!(output.index_html.contains("class=\"text-offset\" aria-hidden=\"true\" style=\"margin-left:-0.5px\""));
 }
 
