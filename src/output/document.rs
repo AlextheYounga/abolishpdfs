@@ -170,7 +170,7 @@ fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog, depth: 
         html,
         depth,
         &format!(
-            "<span class=\"text-run\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};font-kerning:none;{spacing}{}\">{}</span>",
+            "<span class=\"text-run\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};font-kerning:none;font-variant-ligatures:none;{spacing}{}\">{}</span>",
             run.source,
             css_number(run.style.font_size),
             css_color(fill),
