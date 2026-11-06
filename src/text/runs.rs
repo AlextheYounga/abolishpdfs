@@ -10,6 +10,8 @@ use super::projection::{self, Projection};
 
 mod expanded_source_groups;
 use expanded_source_groups::ExpandedSourceGroups;
+mod word_spaces;
+use word_spaces::reconstruct_word_spaces;
 
 const BASELINE_TOLERANCE: f32 = 0.5;
 const FONT_SIZE_RELATIVE_TOLERANCE: f32 = 0.05;
@@ -187,6 +189,8 @@ fn build_run(
 ) -> PreparedRun {
     let first = characters[0].glyph;
     let transform = transform_class(first.transform.as_ref());
+    let reconstructed_characters = reconstruct_word_spaces(characters, transform, fonts);
+    let characters = &reconstructed_characters;
     let expanded_source_groups = ExpandedSourceGroups::identify(characters, |component| {
         has_rendered_component_metric(component.glyph, component.character, fonts)
     });
@@ -383,3 +387,7 @@ mod expanded_source_groups_tests;
 #[cfg(test)]
 #[path = "runs_semantic_space_tests.rs"]
 mod semantic_space_tests;
+
+#[cfg(test)]
+#[path = "runs_word_spaces_tests.rs"]
+mod word_spaces_tests;

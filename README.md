@@ -68,6 +68,12 @@ The HTML writer also reconstructs high-confidence visual lines, paragraphs,
 headings, and explicit list items. Ambiguous content remains a positioned text
 block rather than being assigned speculative document semantics.
 
+Within text runs, Unicode word boundaries are reconstructed from immutable
+source characters and conservative font-relative gaps. Font shaping is reused
+when it reproduces the PDF positions, and small regular positioning differences
+become bounded word-level letter spacing. Irregular words retain exact
+per-character corrections rather than being guessed.
+
 ## Requirements
 
 Building the converter requires:
