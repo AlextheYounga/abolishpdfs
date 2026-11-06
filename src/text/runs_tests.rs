@@ -220,7 +220,7 @@ fn empty_native_object_recovers_one_space_and_preserves_next_glyph_position() {
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].text, "A B");
     assert_eq!(runs[0].letter_spacing, 12.0);
-    assert_eq!(runs[0].local_offsets, vec![RunOffset { character_index: 1, amount: -24.0 }]);
+    assert_eq!(runs[0].local_offsets, vec![RunOffset { character_index: 2, amount: -24.0 }]);
     assert_eq!(runs[0].observed_advances, vec![0.0, 24.0]);
 }
 

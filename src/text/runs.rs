@@ -260,7 +260,7 @@ fn run_local_offsets(
 ) -> Vec<RunOffset> {
     let letter_spacing = run_letter_spacing(characters, transform, fonts, expanded_source_groups);
     let metrics = RunMetrics { transform, fonts, letter_spacing };
-    characters
+    let offsets = characters
         .windows(2)
         .enumerate()
         .filter_map(|(index, pair)| {
@@ -275,7 +275,33 @@ fn run_local_offsets(
             };
             (amount.abs() > SPACING_TOLERANCE).then_some(RunOffset { character_index: index + 1, amount })
         })
-        .collect()
+        .collect();
+    collapse_offsets_around_semantic_spaces(characters, offsets)
+}
+
+fn collapse_offsets_around_semantic_spaces(characters: &[RunCharacter<'_>], offsets: Vec<RunOffset>) -> Vec<RunOffset> {
+    let semantic_spaces = characters
+        .iter()
+        .enumerate()
+        .filter_map(|(index, character)| character.semantic_space.then_some(index))
+        .collect::<Vec<_>>();
+    let mut collapsed = Vec::<RunOffset>::new();
+
+    for offset in offsets {
+        let character_index = semantic_spaces
+            .iter()
+            .find(|&&space_index| offset.character_index == space_index || offset.character_index == space_index + 1)
+            .map_or(offset.character_index, |space_index| space_index + 1);
+        if let Some(existing) = collapsed.iter_mut().find(|existing| existing.character_index == character_index) {
+            existing.amount += offset.amount;
+        } else {
+            collapsed.push(RunOffset { character_index, amount: offset.amount });
+        }
+    }
+
+    collapsed.retain(|offset| offset.amount.abs() > SPACING_TOLERANCE);
+    collapsed.sort_by_key(|offset| offset.character_index);
+    collapsed
 }
 
 #[derive(Clone, Copy)]
@@ -353,3 +379,7 @@ mod tests;
 #[cfg(test)]
 #[path = "runs_expanded_source_groups_tests.rs"]
 mod expanded_source_groups_tests;
+
+#[cfg(test)]
+#[path = "runs_semantic_space_tests.rs"]
+mod semantic_space_tests;
