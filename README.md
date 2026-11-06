@@ -64,6 +64,10 @@ All pages live in one HTML document, in reading order. Native text and links sit
 over selectively rendered graphics backgrounds. Pages without graphics do not
 pay for a raster background they do not need.
 
+The HTML writer also reconstructs high-confidence visual lines, paragraphs,
+headings, and explicit list items. Ambiguous content remains a positioned text
+block rather than being assigned speculative document semantics.
+
 ## Requirements
 
 Building the converter requires:

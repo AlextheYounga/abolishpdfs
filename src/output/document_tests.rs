@@ -2,9 +2,9 @@ use std::{collections::BTreeMap, fs};
 
 use super::*;
 use crate::model::{
-    AffineTransform, ClipState, FontCatalog, FontProcessingFailure, FontProcessingState, FontSource, Glyph, Point,
-    ProcessedFont, RasterBackground, ReconstructionDecision, Rect, RunOffset, Size, TextFailureReason,
-    TextIntegrityFailure, TextObject, VisibilityDecision,
+    AffineTransform, ClipState, Color, FontCatalog, FontProcessingFailure, FontProcessingState, FontSource, Glyph,
+    Point, ProcessedFont, RasterBackground, ReconstructionDecision, Rect, RunOffset, Size, TextFailureReason,
+    TextIntegrityFailure, TextObject, TextRenderMode, VisibilityDecision,
 };
 use crate::text::{SPACING_MIN_PX, prepare};
 
@@ -88,16 +88,16 @@ fn writer_rotates_and_sizes_transformed_text_on_baseline() {
     prepare(&mut model);
     let output = HtmlWriter::render(&model);
     let page = &output.index_html;
-    assert!(
-        page.contains("left:220px;bottom:420px;transform:matrix(0,-1,1,0,0,0);font-family:sans-serif;font-size:24px")
-    );
+    assert!(page.contains("left:220px;bottom:420px;transform:matrix(0,-1,1,0,0,0);"));
+    assert!(output.document_css.contains("font-family: sans-serif; font-size: 24px;"));
 }
 
 #[test]
 fn writer_emits_axis_aligned_glyph_without_transform_matrix() {
     let output = HtmlWriter::render(&model_with_text("A"));
     let page = &output.index_html;
-    assert!(page.contains("left:72px;top:68px;font-family:sans-serif;font-size:12px"));
+    assert!(page.contains("left:72px;top:68px;"));
+    assert!(output.document_css.contains("font-family: sans-serif; font-size: 12px;"));
     assert!(!page.contains("transform:matrix"));
 }
 
@@ -115,21 +115,51 @@ fn writer_serializes_prepared_run_text_and_spacing() {
     model.pages[0].prepared_runs[0].local_offsets.push(RunOffset { character_index: 1, amount: -0.5 });
 
     let output = HtmlWriter::render(&model);
-    assert_eq!(output.index_html.matches("class=\"text-run\"").count(), 1);
+    assert_eq!(output.index_html.matches("class=\"text-run text-style-").count(), 1);
     assert!(output.index_html.contains(">A<span class=\"text-offset\""));
-    assert!(output.index_html.contains("letter-spacing:1.25px;"));
-    assert!(output.index_html.contains("font-kerning:none;"));
-    assert!(output.index_html.contains("font-kerning:none;font-variant-ligatures:none;"));
+    assert!(output.document_css.contains("letter-spacing: 1.25px;"));
+    assert!(output.document_css.contains("font-kerning: none;"));
+    assert!(output.document_css.contains("font-variant-ligatures: none;"));
     assert!(output.index_html.contains("class=\"text-offset\" aria-hidden=\"true\" style=\"margin-left:-0.5px\""));
+}
+
+#[test]
+fn writer_reuses_css_classes_for_matching_text_styles() {
+    let mut model = model_with_text("A");
+    let mut second = model.pages[0].text_objects[0].clone();
+    second.source = 5;
+    second.glyphs[0].unicode = Some('B');
+    second.glyphs[0].origin.y -= 24.0;
+    model.pages[0].text_objects.push(second);
+    prepare(&mut model);
+
+    let output = HtmlWriter::render(&model);
+
+    assert_eq!(output.index_html.matches("text-style-0").count(), 2);
+    assert_eq!(output.document_css.matches(".text-style-0").count(), 1);
+    assert!(!output.document_css.contains(".text-style-1"));
+}
+
+#[test]
+fn writer_emits_semantic_wrappers_for_explicit_list_items() {
+    let mut model = model_with_text("-");
+    model.pages[0].prepared_runs[0].text = "- Item".to_owned();
+
+    let output = HtmlWriter::render(&model);
+
+    assert!(output.index_html.contains("<ul class=\"text-list\">"));
+    assert!(output.index_html.contains("<li class=\"text-block\">"));
+    assert!(output.index_html.contains("<span class=\"text-line\">"));
 }
 
 #[test]
 fn writer_indents_structure_without_whitespace_inside_escaped_run_text() {
     let output = HtmlWriter::render(&model_with_text("<"));
-    let run_line = output.index_html.lines().find(|line| line.contains("class=\"text-run\"")).unwrap_or_default();
+    let run_line =
+        output.index_html.lines().find(|line| line.contains("class=\"text-run text-style-")).unwrap_or_default();
 
     assert!(output.index_html.contains("\n  <body>\n"));
-    assert!(output.index_html.contains("\n          <span class=\"text-run\""));
+    assert!(output.index_html.contains("\n              <span class=\"text-run text-style-"));
     assert!(run_line.ends_with(">&lt;</span>"));
     assert!(!run_line.contains(">&lt;\n"));
 }
@@ -139,11 +169,11 @@ fn writer_emits_letter_spacing_only_above_pixel_threshold() {
     let mut model = model_with_text("A");
     model.pages[0].prepared_runs[0].letter_spacing = SPACING_MIN_PX + 0.0001;
     let output = HtmlWriter::render(&model);
-    assert!(output.index_html.contains("letter-spacing:0.0011px;"));
+    assert!(output.document_css.contains("letter-spacing: 0.0011px;"));
 
     model.pages[0].prepared_runs[0].letter_spacing = SPACING_MIN_PX - 0.0001;
     let output = HtmlWriter::render(&model);
-    assert!(!output.index_html.contains("letter-spacing:"));
+    assert!(!output.document_css.contains("letter-spacing:"));
 }
 
 #[test]
@@ -225,7 +255,7 @@ fn writer_embeds_fonts_and_assigns_native_glyphs() {
     let output = HtmlWriter::render(&model);
     assert!(output.document_css.contains("@font-face{font-family:'pdf-font-0';src:url('assets/font-0.woff2');}"));
     assert!(output.assets.contains(&("font-0.woff2".to_owned(), vec![119, 79, 70, 50, 1])));
-    assert!(output.index_html.contains("font-family:'pdf-font-0',sans-serif"));
+    assert!(output.document_css.contains("font-family: 'pdf-font-0',sans-serif"));
 }
 
 #[test]
@@ -268,7 +298,7 @@ fn non_embedded_font_keeps_system_font_output() {
     prepare(&mut model);
 
     let output = HtmlWriter::render(&model);
-    assert!(output.index_html.contains("font-family:sans-serif"));
+    assert!(output.document_css.contains("font-family: sans-serif"));
 }
 
 #[test]

@@ -1,10 +1,12 @@
 use std::{fmt, fs, io, path::Path};
 
 use crate::model::{
-    Color, DocumentModel, FontCatalog, FontProcessingState, Link, LinkTarget, OutlineItem, PageModel, PreparedRun,
-    RunOffset, RunPlacement, TextIntegrityFailure, TextRenderMode,
+    DocumentModel, FontCatalog, FontProcessingState, Link, LinkTarget, OutlineItem, PageModel, PreparedRun, RunOffset,
+    RunPlacement, TextIntegrityFailure,
 };
-use crate::text::{SPACING_MIN_PX, projection::css_number};
+use crate::text::{BlockKind, TextBlock, TextStructure, projection::css_number};
+
+use super::text_styles::TextStyleCatalog;
 
 const DOCUMENT_CSS: &str = r#":root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -13,7 +15,10 @@ body { padding: 24px; }
 .document { display: flex; flex-direction: column; align-items: center; gap: 24px; }
 .page { position: relative; overflow: hidden; background: white; box-shadow: 0 2px 12px #2228; }
 .page-content { position: absolute; inset: 0; overflow: hidden; transform-origin: 0 0; }
-.text-run { position: absolute; white-space: pre; transform-origin: left bottom; }
+.text-block, .text-line, .text-list { display: contents; margin: 0; padding: 0; }
+.text-block { font-style: normal; font-weight: normal; }
+.text-list { list-style: none; }
+.text-run { position: absolute; white-space: pre; transform-origin: left bottom; font-kerning: none; font-variant-ligatures: none; }
 .text-offset { display: inline-block; width: 0; height: 0; }
 .page-background { position: absolute; inset: 0; width: 100%; height: 100%; }
 .page-link { position: absolute; z-index: 2; }
@@ -33,7 +38,9 @@ pub struct HtmlDocument {
 
 impl HtmlWriter {
     pub fn render(model: &DocumentModel) -> HtmlDocument {
-        let index_html = render_index(model);
+        let text_styles = TextStyleCatalog::from_model(model);
+        let context = RenderContext { fonts: &model.fonts, text_styles: &text_styles };
+        let index_html = render_index(model, &context);
         let mut assets = model
             .pages
             .iter()
@@ -52,7 +59,11 @@ impl HtmlWriter {
             ));
             assets.push((processed.asset_name.clone(), processed.data.clone()));
         }
-        HtmlDocument { index_html, document_css: format!("{font_css}{DOCUMENT_CSS}"), assets }
+        HtmlDocument {
+            index_html,
+            document_css: format!("{font_css}{DOCUMENT_CSS}{}", text_styles.render_css()),
+            assets,
+        }
     }
 
     pub fn write_to(model: &DocumentModel, output: &Path) -> Result<(), OutputError> {
@@ -71,7 +82,7 @@ impl HtmlWriter {
     }
 }
 
-fn render_index(model: &DocumentModel) -> String {
+fn render_index(model: &DocumentModel, context: &RenderContext<'_>) -> String {
     let mut html = String::new();
     render_line(&mut html, 0, "<!doctype html>");
     render_line(&mut html, 0, "<html lang=\"en\">");
@@ -92,7 +103,7 @@ fn render_index(model: &DocumentModel) -> String {
     }
     render_line(&mut html, 2, "<main id=\"page-container\" class=\"document\">");
     for page in &model.pages {
-        render_page(&mut html, page, &model.fonts, 3);
+        render_page(&mut html, page, context, 3);
     }
     render_line(&mut html, 2, "</main>");
     render_line(&mut html, 1, "</body>");
@@ -106,7 +117,7 @@ fn render_line(html: &mut String, depth: usize, content: &str) {
     html.push('\n');
 }
 
-fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog, depth: usize) {
+fn render_page(html: &mut String, page: &PageModel, context: &RenderContext<'_>, depth: usize) {
     let page_width = page.crop_box.right - page.crop_box.left;
     let page_height = page.crop_box.top - page.crop_box.bottom;
     render_line(
@@ -129,9 +140,7 @@ fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog, depth: 
             &format!("<img class=\"page-background\" alt=\"\" src=\"assets/page-{}.png\">", page.number),
         );
     }
-    for run in &page.prepared_runs {
-        render_run(html, run, fonts, depth + 2);
-    }
+    render_text_structure(html, &page.prepared_runs, context, depth + 2);
     for link in &page.links {
         render_link(html, page, link, depth + 2);
     }
@@ -139,15 +148,51 @@ fn render_page(html: &mut String, page: &PageModel, fonts: &FontCatalog, depth: 
     render_line(html, depth, "</section>");
 }
 
-fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog, depth: usize) {
-    let fill = run.style.fill.unwrap_or(Color::BLACK);
-    let family = match run.style.font.and_then(|id| fonts.fonts.get(&id)) {
-        None => "sans-serif".to_owned(),
-        Some(font) => match &font.processing {
-            FontProcessingState::NotRequired => "sans-serif".to_owned(),
-            FontProcessingState::Ready(processed) => format!("'{}',sans-serif", processed.family_name),
-            FontProcessingState::Pending | FontProcessingState::Failed(_) => return,
-        },
+fn render_text_structure(html: &mut String, runs: &[PreparedRun], context: &RenderContext<'_>, depth: usize) {
+    let structure = TextStructure::from_runs(runs);
+    let block_context = TextBlockContext { runs, render: context };
+    let mut block_index = 0;
+    while block_index < structure.blocks.len() {
+        if structure.blocks[block_index].kind == BlockKind::ListItem {
+            render_line(html, depth, "<ul class=\"text-list\">");
+            while block_index < structure.blocks.len() && structure.blocks[block_index].kind == BlockKind::ListItem {
+                render_text_block(html, &structure.blocks[block_index], &block_context, depth + 1);
+                block_index += 1;
+            }
+            render_line(html, depth, "</ul>");
+        } else {
+            render_text_block(html, &structure.blocks[block_index], &block_context, depth);
+            block_index += 1;
+        }
+    }
+}
+
+fn render_text_block(html: &mut String, block: &TextBlock, context: &TextBlockContext<'_>, depth: usize) {
+    let tag = match block.kind {
+        BlockKind::Heading1 => "h1",
+        BlockKind::Heading2 => "h2",
+        BlockKind::Paragraph => "p",
+        BlockKind::ListItem => "li",
+    };
+    render_line(html, depth, &format!("<{tag} class=\"text-block\">"));
+    for line in &block.lines {
+        render_line(html, depth + 1, "<span class=\"text-line\">");
+        for run in &context.runs[line.clone()] {
+            render_run(html, run, context.render, depth + 2);
+        }
+        render_line(html, depth + 1, "</span>");
+    }
+    render_line(html, depth, &format!("</{tag}>"));
+}
+
+struct TextBlockContext<'a> {
+    runs: &'a [PreparedRun],
+    render: &'a RenderContext<'a>,
+}
+
+fn render_run(html: &mut String, run: &PreparedRun, context: &RenderContext<'_>, depth: usize) {
+    let Some(style_index) = context.text_styles.index_for(run, context.fonts) else {
+        return;
     };
     let position = match run.placement {
         RunPlacement::Bounded { left, top } => format!("left:{}px;top:{}px;", css_number(left), css_number(top)),
@@ -161,23 +206,20 @@ fn render_run(html: &mut String, run: &PreparedRun, fonts: &FontCatalog, depth: 
             css_number(matrix[3])
         ),
     };
-    let spacing = if run.letter_spacing.abs() > SPACING_MIN_PX {
-        format!("letter-spacing:{}px;", css_number(run.letter_spacing))
-    } else {
-        String::new()
-    };
     render_line(
         html,
         depth,
         &format!(
-            "<span class=\"text-run\" data-source=\"{}\" style=\"{position}font-family:{family};font-size:{}px;color:{};font-kerning:none;font-variant-ligatures:none;{spacing}{}\">{}</span>",
+            "<span class=\"text-run text-style-{style_index}\" data-source=\"{}\" style=\"{position}\">{}</span>",
             run.source,
-            css_number(run.style.font_size),
-            css_color(fill),
-            render_mode_style(run.style.render_mode, run.style.stroke),
             render_run_text(&run.text, &run.local_offsets)
         ),
     );
+}
+
+struct RenderContext<'a> {
+    fonts: &'a FontCatalog,
+    text_styles: &'a TextStyleCatalog,
 }
 
 fn render_run_text(text: &str, offsets: &[RunOffset]) -> String {
@@ -253,19 +295,6 @@ fn is_safe_uri(uri: &str) -> bool {
         return false;
     };
     matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "mailto" | "tel")
-}
-
-fn render_mode_style(mode: TextRenderMode, stroke: Option<Color>) -> String {
-    match mode {
-        TextRenderMode::Stroke | TextRenderMode::FillStroke => {
-            stroke.map(|color| format!("-webkit-text-stroke:1px {};", css_color(color))).unwrap_or_default()
-        }
-        _ => String::new(),
-    }
-}
-
-fn css_color(color: Color) -> String {
-    format!("rgba({}, {}, {}, {:.4})", color.red, color.green, color.blue, color.alpha as f32 / 255.0)
 }
 
 fn escape_html(value: &str) -> String {
