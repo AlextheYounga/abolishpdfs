@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, ops::Range};
 
 use crate::model::{
     AffineTransform, FontCatalog, FontProcessingState, Glyph, PageModel, PreparedRun, ReconstructionDecision,
@@ -7,6 +7,9 @@ use crate::model::{
 use ttf_parser::Face;
 
 use super::projection::{self, Projection};
+
+mod expanded_source_groups;
+use expanded_source_groups::ExpandedSourceGroups;
 
 const BASELINE_TOLERANCE: f32 = 0.5;
 const FONT_SIZE_RELATIVE_TOLERANCE: f32 = 0.05;
@@ -66,7 +69,7 @@ struct RunBuilder<'a> {
 }
 
 #[derive(Clone, Copy)]
-struct RunCharacter<'a> {
+pub(super) struct RunCharacter<'a> {
     glyph: &'a Glyph,
     character: char,
     semantic_space: bool,
@@ -184,6 +187,9 @@ fn build_run(
 ) -> PreparedRun {
     let first = characters[0].glyph;
     let transform = transform_class(first.transform.as_ref());
+    let expanded_source_groups = ExpandedSourceGroups::identify(characters, |component| {
+        has_rendered_component_metric(component.glyph, component.character, fonts)
+    });
     let placement = match transform {
         TransformClass::Identity => {
             let bounds = first.tight_bounds.or(first.loose_bounds);
@@ -215,16 +221,29 @@ fn build_run(
             .windows(2)
             .map(|pair| observed_advance(pair[0].glyph, pair[1].glyph, transform))
             .collect(),
-        local_offsets: run_local_offsets(characters, transform, fonts),
-        letter_spacing: run_letter_spacing(characters, transform, fonts),
+        local_offsets: run_local_offsets(characters, transform, fonts, &expanded_source_groups),
+        letter_spacing: run_letter_spacing(characters, transform, fonts, &expanded_source_groups),
         text: characters.iter().map(|character| character.character).collect(),
     }
 }
 
-fn run_letter_spacing(characters: &[RunCharacter<'_>], transform: TransformClass, fonts: &FontCatalog) -> f32 {
+fn has_rendered_component_metric(glyph: &Glyph, character: char, fonts: &FontCatalog) -> bool {
+    glyph.font.and_then(|font_id| fonts.fonts.get(&font_id)).is_some_and(|font| {
+        matches!(&font.processing, FontProcessingState::Ready(processed) if processed.advances_by_unicode.contains_key(&character))
+    })
+}
+
+fn run_letter_spacing(
+    characters: &[RunCharacter<'_>],
+    transform: TransformClass,
+    fonts: &FontCatalog,
+    expanded_source_groups: &ExpandedSourceGroups,
+) -> f32 {
     let mut compensations = characters
         .windows(2)
-        .filter_map(|pair| measured_compensation(pair[0], pair[1], transform, fonts))
+        .enumerate()
+        .filter(|(index, _)| !expanded_source_groups.contains_component(*index))
+        .filter_map(|(_, pair)| measured_compensation(pair[0], pair[1], transform, fonts))
         .collect::<Vec<_>>();
     if compensations.is_empty() {
         return 0.0;
@@ -237,16 +256,49 @@ fn run_local_offsets(
     characters: &[RunCharacter<'_>],
     transform: TransformClass,
     fonts: &FontCatalog,
+    expanded_source_groups: &ExpandedSourceGroups,
 ) -> Vec<RunOffset> {
-    let letter_spacing = run_letter_spacing(characters, transform, fonts);
+    let letter_spacing = run_letter_spacing(characters, transform, fonts, expanded_source_groups);
+    let metrics = RunMetrics { transform, fonts, letter_spacing };
     characters
         .windows(2)
         .enumerate()
         .filter_map(|(index, pair)| {
-            let amount = measured_compensation(pair[0], pair[1], transform, fonts)? - letter_spacing;
+            if expanded_source_groups.contains_internal_transition(index) {
+                return None;
+            }
+            let next_index = index + 1;
+            let amount = if let Some(group) = expanded_source_groups.ends_before(next_index) {
+                expanded_group_exit_offset(characters, group, pair[1], metrics)?
+            } else {
+                measured_compensation(pair[0], pair[1], metrics.transform, metrics.fonts)? - metrics.letter_spacing
+            };
             (amount.abs() > SPACING_TOLERANCE).then_some(RunOffset { character_index: index + 1, amount })
         })
         .collect()
+}
+
+#[derive(Clone, Copy)]
+struct RunMetrics<'a> {
+    transform: TransformClass,
+    fonts: &'a FontCatalog,
+    letter_spacing: f32,
+}
+
+fn expanded_group_exit_offset(
+    characters: &[RunCharacter<'_>],
+    group: &Range<usize>,
+    next: RunCharacter<'_>,
+    metrics: RunMetrics<'_>,
+) -> Option<f32> {
+    let component_advances = characters[group.clone()]
+        .iter()
+        .map(|component| natural_advance(component.glyph, component.character, metrics.transform, metrics.fonts))
+        .collect::<Option<Vec<_>>>()?;
+    // Each component receives the run's letter spacing before the next physical glyph.
+    let rendered_group_advance =
+        component_advances.into_iter().sum::<f32>() + metrics.letter_spacing * group.len() as f32;
+    Some(observed_advance(characters[group.start].glyph, next.glyph, metrics.transform) - rendered_group_advance)
 }
 
 fn measured_compensation(
@@ -297,3 +349,7 @@ fn observed_advance(previous: &Glyph, next: &Glyph, transform: TransformClass) -
 #[cfg(test)]
 #[path = "runs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "runs_expanded_source_groups_tests.rs"]
+mod expanded_source_groups_tests;

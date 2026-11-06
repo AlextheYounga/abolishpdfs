@@ -72,6 +72,29 @@ fn catalog_with_font(data: Option<Vec<u8>>, processing: FontProcessingState) -> 
     fonts
 }
 
+fn catalog_with_metrics(metrics: &[(char, u16)]) -> FontCatalog {
+    catalog_with_font(
+        None,
+        FontProcessingState::Ready(ProcessedFont {
+            asset_name: "fixture.woff2".to_owned(),
+            family_name: "fixture".to_owned(),
+            data: Vec::new(),
+            glyph_count: metrics.len() + 1,
+            advance_widths: metrics.iter().map(|(_, advance)| *advance).collect(),
+            units_per_em: 1000,
+            advances_by_unicode: metrics.iter().copied().collect(),
+        }),
+    )
+}
+
+fn expanded_component(character: char, x: f32) -> Glyph {
+    let mut result = glyph(character, x, 80.0);
+    result.source_code = Some(264);
+    result.glyph_id = Some(264);
+    result.generated_by_pdfium = Some(false);
+    result
+}
+
 #[test]
 fn compatible_glyphs_form_one_run_in_source_order() {
     let runs = prepare_page(&page(object(vec![glyph('A', 10.0, 80.0), glyph('B', 18.0, 80.0)])), &FontCatalog::new());
@@ -288,4 +311,65 @@ fn fonts_without_processed_metrics_or_source_data_have_no_advance() {
     test_glyph.font = Some(0);
     let fonts = catalog_with_font(None, FontProcessingState::Pending);
     assert_eq!(natural_advance(&test_glyph, 'A', TransformClass::Identity, &fonts), None);
+}
+
+#[test]
+fn expanded_fl_uses_component_advances_and_preserves_the_following_glyph_endpoint() {
+    let mut first = glyph('A', 0.0, 80.0);
+    first.font = Some(0);
+    let mut ligature_f = expanded_component('f', 5.8);
+    ligature_f.font = Some(0);
+    let mut ligature_l = expanded_component('l', 5.8);
+    ligature_l.font = Some(0);
+    let mut following = glyph('o', 11.0, 80.0);
+    following.font = Some(0);
+
+    let runs = prepare_page(
+        &page(object(vec![first, ligature_f, ligature_l, following])),
+        &catalog_with_metrics(&[('A', 400), ('f', 300), ('l', 200), ('o', 400)]),
+    );
+
+    assert_eq!(runs[0].text, "Aflo");
+    assert_eq!(runs[0].letter_spacing, 1.0);
+    assert_eq!(runs[0].observed_advances, vec![5.8, 0.0, 5.2]);
+    assert_eq!(runs[0].local_offsets.len(), 1);
+    assert_eq!(runs[0].local_offsets[0].character_index, 3);
+    assert!((runs[0].local_offsets[0].amount + 2.8).abs() < 1e-5);
+}
+
+#[test]
+fn expanded_fi_uses_component_advances_without_an_internal_overlap_offset() {
+    let mut ligature_f = expanded_component('f', 0.0);
+    ligature_f.font = Some(0);
+    let mut ligature_i = expanded_component('i', 0.0);
+    ligature_i.font = Some(0);
+    let mut following = glyph('o', 6.0, 80.0);
+    following.font = Some(0);
+
+    let runs = prepare_page(
+        &page(object(vec![ligature_f, ligature_i, following])),
+        &catalog_with_metrics(&[('f', 300), ('i', 200), ('o', 400)]),
+    );
+
+    assert_eq!(runs[0].text, "fio");
+    assert_eq!(runs[0].letter_spacing, 0.0);
+    assert!(runs[0].local_offsets.is_empty());
+    assert_eq!(runs[0].observed_advances, vec![0.0, 6.0]);
+}
+
+#[test]
+fn same_origin_non_pdfium_glyphs_remain_ordinary_overprint_geometry() {
+    let mut first = expanded_component('f', 0.0);
+    first.font = Some(0);
+    first.generated_by_pdfium = Some(false);
+    let mut second = expanded_component('l', 0.0);
+    second.font = Some(0);
+    second.generated_by_pdfium = Some(false);
+    second.glyph_id = Some(265);
+
+    let runs = prepare_page(&page(object(vec![first, second])), &catalog_with_metrics(&[('f', 300), ('l', 200)]));
+
+    assert_eq!(runs[0].text, "fl");
+    assert!((runs[0].letter_spacing + 3.6).abs() < 1e-5);
+    assert!(runs[0].local_offsets.is_empty());
 }
