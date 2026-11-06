@@ -124,6 +124,41 @@ fn writer_serializes_prepared_run_text_and_spacing() {
 }
 
 #[test]
+fn writer_replaces_uniform_intra_word_offsets_with_word_spacing() {
+    let mut model = model_with_text("w");
+    model.pages[0].prepared_runs[0].text = "word".to_owned();
+    model.pages[0].prepared_runs[0].style.font = Some(0);
+    model.pages[0].prepared_runs[0].local_offsets = vec![
+        RunOffset { character_index: 1, amount: -0.1 },
+        RunOffset { character_index: 2, amount: -0.1 },
+        RunOffset { character_index: 3, amount: -0.1 },
+    ];
+    model.fonts.insert(FontSource {
+        name: "Fixture".to_owned(),
+        embedded: Some(true),
+        data: None,
+        used_unicode: "word".chars().collect(),
+        used_identities: Vec::new(),
+        mapping_proven: true,
+        processing: FontProcessingState::Ready(ProcessedFont {
+            asset_name: "fixture.woff2".to_owned(),
+            family_name: "fixture".to_owned(),
+            data: Vec::new(),
+            glyph_count: 4,
+            advance_widths: vec![1000; 4],
+            units_per_em: 1000,
+            advances_by_unicode: "word".chars().map(|character| (character, 1000)).collect(),
+        }),
+    });
+
+    let output = HtmlWriter::render(&model);
+
+    assert!(output.index_html.contains("class=\"text-word\" style=\"letter-spacing:"));
+    assert!(!output.index_html.contains("class=\"text-offset\""));
+    assert!(output.index_html.contains(">word</span>"));
+}
+
+#[test]
 fn writer_reuses_css_classes_for_matching_text_styles() {
     let mut model = model_with_text("A");
     let mut second = model.pages[0].text_objects[0].clone();

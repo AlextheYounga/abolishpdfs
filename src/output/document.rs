@@ -1,12 +1,13 @@
 use std::{fmt, fs, io, path::Path};
 
 use crate::model::{
-    DocumentModel, FontCatalog, FontProcessingState, Link, LinkTarget, OutlineItem, PageModel, PreparedRun, RunOffset,
+    DocumentModel, FontCatalog, FontProcessingState, Link, LinkTarget, OutlineItem, PageModel, PreparedRun,
     RunPlacement, TextIntegrityFailure,
 };
 use crate::text::{BlockKind, TextBlock, TextStructure, projection::css_number};
 
 use super::text_styles::TextStyleCatalog;
+use super::words::render_run_text;
 
 const DOCUMENT_CSS: &str = r#":root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -19,6 +20,7 @@ body { padding: 24px; }
 .text-block { font-style: normal; font-weight: normal; }
 .text-list { list-style: none; }
 .text-run { position: absolute; white-space: pre; transform-origin: left bottom; font-kerning: none; font-variant-ligatures: none; }
+.text-word-shaped { font-kerning: normal; }
 .text-offset { display: inline-block; width: 0; height: 0; }
 .page-background { position: absolute; inset: 0; width: 100%; height: 100%; }
 .page-link { position: absolute; z-index: 2; }
@@ -212,7 +214,7 @@ fn render_run(html: &mut String, run: &PreparedRun, context: &RenderContext<'_>,
         &format!(
             "<span class=\"text-run text-style-{style_index}\" data-source=\"{}\" style=\"{position}\">{}</span>",
             run.source,
-            render_run_text(&run.text, &run.local_offsets)
+            render_run_text(run, context.fonts)
         ),
     );
 }
@@ -220,22 +222,6 @@ fn render_run(html: &mut String, run: &PreparedRun, context: &RenderContext<'_>,
 struct RenderContext<'a> {
     fonts: &'a FontCatalog,
     text_styles: &'a TextStyleCatalog,
-}
-
-fn render_run_text(text: &str, offsets: &[RunOffset]) -> String {
-    let mut rendered = String::new();
-    let mut offset_index = 0;
-    for (character_index, character) in text.chars().enumerate() {
-        while let Some(offset) = offsets.get(offset_index).filter(|offset| offset.character_index == character_index) {
-            rendered.push_str(&format!(
-                "<span class=\"text-offset\" aria-hidden=\"true\" style=\"margin-left:{}px\"></span>",
-                css_number(offset.amount)
-            ));
-            offset_index += 1;
-        }
-        rendered.push_str(&escape_html(&character.to_string()));
-    }
-    rendered
 }
 
 fn render_outline_item(html: &mut String, item: &OutlineItem, depth: usize) {
@@ -297,7 +283,7 @@ fn is_safe_uri(uri: &str) -> bool {
     matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "mailto" | "tel")
 }
 
-fn escape_html(value: &str) -> String {
+pub(super) fn escape_html(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
         match character {
