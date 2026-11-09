@@ -73,7 +73,9 @@ FontForge is the primary font-processing backend for the initial implementation.
 The headless `fontforge` executable must be available on `PATH`, or configured with
 `--fontforge-path` / `ABOLISHPDFS_FONTFORGE_PATH`. The pipeline invokes one isolated
 job per embedded TrueType or OpenType font and emits deterministic WOFF2 assets;
-fonts that cannot be processed remain on the documented raster fallback path.
+fonts that cannot be processed are reported as conversion failures when used by
+native text. Font preparation belongs to `fonts::prepare_document`; the owned
+model does not implement subprocess orchestration.
 
 It will handle:
 
@@ -138,10 +140,9 @@ deactivate/render/reactivate bitmap check for text objects. A target-platform
 Milestone 1 run passes only when the report shows that suppressing active text
 changes the bitmap, reactivation restores the original bitmap, and no operation
 errors are reported. It also states the current public-API limitation of stock
-PDFium builds: no per-character PDF-code or glyph-ID mapping. Extraction probes
-the optional additive exports described in `patches/pdfium/`; when the loaded
-binary provides them, glyphs carry source character codes and glyph IDs, while
-stock binaries continue unchanged with the limitation reported.
+PDFium builds: no per-character PDF-code or glyph-ID mapping. The converter
+requires the patched runtime described in `patches/pdfium/` and verifies its
+extension ABI before extraction or probing. Stock binaries are rejected.
 
 Milestone 2 adds the owned diagnostic converter. It can be exercised with:
 
@@ -209,10 +210,10 @@ reconstructed natively is reported as a structured conversion failure.
 
 ## Phase 7: Glyph identity and glyph-driven fonts
 
-Extraction records optional per-character source identity (`source_code`,
-`glyph_id`) on glyphs and per-font identity triples, populated only when the
-loaded PDFium exports the additive identity functions documented in
-`patches/pdfium/`. FontForge jobs now receive a JSON request specification of
+Extraction records per-character source identity (`source_code`, `glyph_id`)
+on glyphs and per-font identity triples through the mandated extension
+documented in `patches/pdfium/`. Generated characters may lack source identity.
+FontForge jobs receive a JSON request specification of
 semantic-Unicode slots carrying resolved PostScript names; with names present
 the worker moves source-drawn outlines onto their semantic slots, so misleading
 ToUnicode data can no longer change rendered shapes, and without names it falls
@@ -227,8 +228,23 @@ compensation stays deterministic across platforms.
 The extraction pass analyzes text against later paint objects using owned model data. Complete containment by an active,
 opaque, unclipped path is classified as `CoveredByOpaquePaint`; partial overlap, unknown bounds, transparency, or clipping
 is classified as `AmbiguousVisibility`. Overlap alone never proves coverage. Visibility-driven background fallback is
-represented by `FallbackReason` and serialized with each text object; ambiguous extractable text also receives an
+represented by `ReconstructionDecision::TextFailure` and serialized with each text object; ambiguous extractable text also receives an
 object-scoped diagnostic.
+
+`DocumentModel::discovered_text_failures` derives the effective text-integrity
+report from current reconstruction and font-processing state, plus any explicit
+caller-supplied failures. Both diagnostic JSON's `text_failures` and the output
+gate use this report; extraction does not maintain a duplicate failure list.
+Failed character extraction remains `ExtractionError`, distinct from valid
+empty spacing objects. Required graphics without a rendered background also
+block output before any artifacts are written.
+
+Layout and word output share `fonts::FontMetrics`: processed per-Unicode
+advances take precedence, missing entries fall back to source cmap metrics,
+and unavailable metrics remain unknown. Font parsing uses `ttf-parser` rather
+than a separate cmap implementation. FontForge job logs go to workspace files
+to avoid pipe deadlocks; failure reports retain bounded log tails, and timeout
+handling terminates and reaps the child before returning.
 
 Milestone 0 fixture assets live under `tests/fixtures/`. The generated fixtures cover
 ordinary text, transforms, spacing, page boxes, links, and clipping/transparency.

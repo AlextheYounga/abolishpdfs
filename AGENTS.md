@@ -51,6 +51,14 @@ Never cut corners on trust-boundary validation, clarity, terminology, security, 
 
 Prefer code that reads as a vocabulary of the system, not a sequence of implementation details.
 
+Project-specific ownership:
+
+- Keep FontForge execution and font-preparation orchestration in `fonts`, not in model implementation files. The existing `DocumentModel::prepare_fonts` entry point is a compatibility delegate only.
+- Derive object failures from current reconstruction/font state through `DocumentModel::discovered_text_failures`; diagnostic JSON and output validation must use that same report. `text_failures` stores additional caller-supplied failures, not cached copies.
+- Use `fonts::FontMetrics` for advance lookup in both layout and output: processed metrics first, source metrics second, otherwise unknown. Keep coordinate scaling with its layout consumer.
+- Failed extraction is not an empty positioning object. Missing required text or graphics must prevent successful output; never replace an error with successful empty content.
+- Required-fixture tests must fail when fixture loading, parsing, or shaping fails; do not silently return before their assertions.
+
 And finally, please update any related documentation **if necessary, use your best judgement**:
 - `docs/PROJECT.md`
 - `README.md`

@@ -1,7 +1,7 @@
-//! Integration test: all `.rs` source files must stay at or below 400 lines.
+//! Integration test: project-owned `.rs` source files stay at or below 400 lines.
 //!
 //! This is a structural scan — no type inference needed.
-//! Skips `target/`, `vendor/`, and `node_modules/` by convention.
+//! Only scans source, tests, and examples; never follows third-party symlinks.
 
 use std::fs;
 use std::path::Path;
@@ -14,7 +14,9 @@ fn source_files_stay_under_400_lines() {
     let mut violations: Vec<String> = Vec::new();
     let mut file_count = 0;
 
-    visit_dirs(project_root, &mut file_count, &mut violations);
+    for directory in ["src", "tests", "examples"] {
+        visit_dirs(&project_root.join(directory), &mut file_count, &mut violations);
+    }
 
     assert!(file_count > 0, "No source files found. This test should be run from the project root.");
 
@@ -27,6 +29,9 @@ fn visit_dirs(dir: &Path, file_count: &mut usize, violations: &mut Vec<String>) 
     };
 
     for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
+            continue;
+        }
         let path = entry.path();
 
         if path.is_dir() {
