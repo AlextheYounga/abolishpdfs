@@ -1,11 +1,11 @@
 use std::ops::Range;
 
 use rustybuzz::{Feature, UnicodeBuffer};
-use ttf_parser::Face;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    model::{FontCatalog, FontProcessingState, FontSource, PreparedRun, RunOffset, RunPlacement},
+    fonts::FontMetrics,
+    model::{FontCatalog, FontSource, PreparedRun, RunOffset, RunPlacement},
     text::{SPACING_MIN_PX, projection::css_number},
 };
 
@@ -154,24 +154,11 @@ fn natural_advances(
 ) -> Option<Vec<f32>> {
     let font_id = run.style.font?;
     let font = fonts.fonts.get(&font_id)?;
-    let scale = horizontal_scale(run);
+    let scale = horizontal_scale(run) * run.style.font_size;
+    let metrics = FontMetrics::new(font);
     characters[range.clone()]
         .iter()
-        .map(|character| match &font.processing {
-            FontProcessingState::Ready(processed) => processed
-                .advances_by_unicode
-                .get(character)
-                .map(|advance| f32::from(*advance) / f32::from(processed.units_per_em) * run.style.font_size * scale),
-            _ => {
-                let face = Face::parse(font.data.as_deref()?, 0).ok()?;
-                let glyph = face.glyph_index(*character)?;
-                Some(
-                    f32::from(face.glyph_hor_advance(glyph)?) / f32::from(face.units_per_em())
-                        * run.style.font_size
-                        * scale,
-                )
-            }
-        })
+        .map(|character| metrics.advance(*character).map(|advance| advance * scale))
         .collect()
 }
 

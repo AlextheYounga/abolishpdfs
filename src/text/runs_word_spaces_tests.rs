@@ -50,7 +50,8 @@ fn natural_space_sized_glyph_gap_reconstructs_a_word_boundary() {
         RunCharacter { glyph: &third, character: 'C', semantic_space: false },
     ];
 
-    let reconstructed = reconstruct_word_spaces(&characters, TransformClass::Identity, &fonts);
+    let metrics = FontMetrics::new(&fonts.fonts[&0]);
+    let reconstructed = reconstruct_word_spaces(&characters, TransformClass::Identity, Some(&metrics));
 
     assert_eq!(reconstructed.iter().map(|character| character.character).collect::<String>(), "A BC");
 }
@@ -89,7 +90,8 @@ fn expanded_source_glyph_does_not_create_a_false_word_boundary() {
         RunCharacter { glyph: &third, character: 'o', semantic_space: false },
     ];
 
-    let reconstructed = reconstruct_word_spaces(&characters, TransformClass::Identity, &fonts);
+    let metrics = FontMetrics::new(&fonts.fonts[&0]);
+    let reconstructed = reconstruct_word_spaces(&characters, TransformClass::Identity, Some(&metrics));
 
     assert_eq!(reconstructed.iter().map(|character| character.character).collect::<String>(), "flo");
 }

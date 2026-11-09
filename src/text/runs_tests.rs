@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
+use ttf_parser::Face;
 
 use super::*;
 use crate::model::{
@@ -251,9 +252,7 @@ fn fallback_objects_do_not_form_native_runs() {
 
 #[test]
 fn processed_font_advance_takes_precedence_over_source_font() {
-    let data = fixture_data();
-    assert!(data.is_some(), "Liberation Sans fixture is required");
-    let Some(data) = data else { return };
+    let data = fixture_data().expect("Liberation Sans fixture is required");
     let processed = ProcessedFont {
         asset_name: "fixture.woff2".to_owned(),
         family_name: "fixture".to_owned(),
@@ -265,43 +264,35 @@ fn processed_font_advance_takes_precedence_over_source_font() {
     };
     let mut test_glyph = glyph('A', 0.0, 0.0);
     test_glyph.font = Some(0);
-    let advance = natural_advance(
-        &test_glyph,
-        'A',
-        TransformClass::Identity,
-        &catalog_with_font(Some(data), FontProcessingState::Ready(processed)),
-    );
+    let fonts = catalog_with_font(Some(data), FontProcessingState::Ready(processed));
+    let metrics = FontMetrics::new(&fonts.fonts[&0]);
+    let advance = natural_advance(&test_glyph, 'A', TransformClass::Identity, Some(&metrics));
     assert_eq!(advance, Some(24.0));
 }
 
 #[test]
 fn empty_processed_metrics_fall_back_to_source_font_advance() {
-    let data = fixture_data();
-    assert!(data.is_some(), "Liberation Sans fixture is required");
-    let Some(data) = data else { return };
-    let Some(face) = Face::parse(&data, 0).ok() else { return };
-    let Some(glyph_id) = face.glyph_index('A') else { return };
-    let Some(source_advance) = face.glyph_hor_advance(glyph_id) else { return };
+    let data = fixture_data().expect("Liberation Sans fixture is required");
+    let face = Face::parse(&data, 0).expect("Liberation Sans fixture must parse");
+    let glyph_id = face.glyph_index('A').expect("fixture must contain A");
+    let source_advance = face.glyph_hor_advance(glyph_id).expect("fixture must contain advance metrics");
     let expected = f32::from(source_advance) / f32::from(face.units_per_em()) * 12.0;
     let mut test_glyph = glyph('A', 0.0, 0.0);
     test_glyph.font = Some(0);
-    let actual = natural_advance(
-        &test_glyph,
-        'A',
-        TransformClass::Identity,
-        &catalog_with_font(
-            Some(data),
-            FontProcessingState::Ready(ProcessedFont {
-                asset_name: "fixture.woff2".to_owned(),
-                family_name: "fixture".to_owned(),
-                data: Vec::new(),
-                glyph_count: 1,
-                advance_widths: Vec::new(),
-                units_per_em: 1000,
-                advances_by_unicode: BTreeMap::new(),
-            }),
-        ),
+    let fonts = catalog_with_font(
+        Some(data),
+        FontProcessingState::Ready(ProcessedFont {
+            asset_name: "fixture.woff2".to_owned(),
+            family_name: "fixture".to_owned(),
+            data: Vec::new(),
+            glyph_count: 1,
+            advance_widths: Vec::new(),
+            units_per_em: 1000,
+            advances_by_unicode: BTreeMap::new(),
+        }),
     );
+    let metrics = FontMetrics::new(&fonts.fonts[&0]);
+    let actual = natural_advance(&test_glyph, 'A', TransformClass::Identity, Some(&metrics));
     assert_eq!(actual, Some(expected));
 }
 
@@ -310,7 +301,8 @@ fn fonts_without_processed_metrics_or_source_data_have_no_advance() {
     let mut test_glyph = glyph('A', 0.0, 0.0);
     test_glyph.font = Some(0);
     let fonts = catalog_with_font(None, FontProcessingState::Pending);
-    assert_eq!(natural_advance(&test_glyph, 'A', TransformClass::Identity, &fonts), None);
+    let metrics = FontMetrics::new(&fonts.fonts[&0]);
+    assert_eq!(natural_advance(&test_glyph, 'A', TransformClass::Identity, Some(&metrics)), None);
 }
 
 #[test]

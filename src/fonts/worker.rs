@@ -1,20 +1,18 @@
 use std::{
     ffi::OsString,
-    fs, io,
+    fs,
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, ExitStatus},
     thread,
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tempfile::TempDir;
-use ttf_parser::Face;
 
-use crate::{
-    fonts::glyph_name,
-    model::{FontId, FontSource, GlyphIdentity, ProcessedFont},
-};
+use super::{FontJobRequest, FontJobSpec};
+use crate::model::ProcessedFont;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -57,97 +55,6 @@ pub enum FontOutputFormat {
     Woff,
 }
 
-#[derive(Debug, Clone)]
-pub struct FontJobRequest<'a> {
-    pub id: FontId,
-    pub source: &'a FontSource,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FontJobSpec {
-    pub family_name: String,
-    pub records: Vec<GlyphJobRecord>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GlyphJobRecord {
-    pub unicode: char,
-    pub source_glyph_name: Option<String>,
-    pub source_code: Option<u32>,
-    pub source_glyph_id: Option<u16>,
-}
-
-impl FontJobSpec {
-    pub fn from_source(source: &FontSource, family_name: String) -> Self {
-        let mut records = Vec::new();
-        for identity in &source.used_identities {
-            let candidate = GlyphJobRecord::from_identity(identity, source.data.as_deref());
-            if let Some(existing) =
-                records.iter_mut().find(|record: &&mut GlyphJobRecord| record.unicode == candidate.unicode)
-            {
-                merge_record(existing, candidate);
-            } else {
-                records.push(candidate);
-            }
-        }
-        if records.is_empty() {
-            records = source
-                .used_unicode
-                .iter()
-                .map(|&unicode| GlyphJobRecord {
-                    unicode,
-                    source_glyph_name: None,
-                    source_code: None,
-                    source_glyph_id: None,
-                })
-                .collect();
-        }
-        if !records.iter().any(|record| record.unicode == ' ') {
-            if let Some(space) = GlyphJobRecord::space(source.data.as_deref()) {
-                records.push(space);
-            }
-        }
-        Self { family_name, records }
-    }
-}
-
-impl GlyphJobRecord {
-    fn from_identity(identity: &GlyphIdentity, data: Option<&[u8]>) -> Self {
-        Self {
-            unicode: identity.unicode,
-            source_glyph_name: identity
-                .glyph_id
-                .and_then(|id| data.and_then(|bytes| glyph_name(bytes, id).ok().flatten()).map(str::to_owned)),
-            source_code: identity.source_code,
-            source_glyph_id: identity.glyph_id,
-        }
-    }
-
-    fn space(data: Option<&[u8]>) -> Option<Self> {
-        let data = data?;
-        let face = Face::parse(data, 0).ok()?;
-        let glyph_id = face.glyph_index(' ')?;
-        Some(Self {
-            unicode: ' ',
-            source_glyph_name: glyph_name(data, glyph_id.0).ok().flatten().map(str::to_owned),
-            source_code: None,
-            source_glyph_id: Some(glyph_id.0),
-        })
-    }
-}
-
-fn merge_record(existing: &mut GlyphJobRecord, candidate: GlyphJobRecord) {
-    if existing.source_glyph_name.is_none() {
-        existing.source_glyph_name = candidate.source_glyph_name;
-    }
-    if existing.source_code.is_none() {
-        existing.source_code = candidate.source_code;
-    }
-    if existing.source_glyph_id.is_none() {
-        existing.source_glyph_id = candidate.source_glyph_id;
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontJobResult {
     pub font: ProcessedFont,
@@ -165,6 +72,8 @@ pub enum FontJobError {
     Workspace(#[from] io::Error),
     #[error("could not start FontForge: {0}")]
     Start(#[source] io::Error),
+    #[error("could not wait for FontForge: {0}")]
+    Wait(#[source] io::Error),
     #[error("FontForge job timed out after {0:?}")]
     Timeout(Duration),
     #[error("FontForge exited unsuccessfully: {0}")]
@@ -208,6 +117,8 @@ impl FontForgeWorker {
             &spec_path,
             serde_json::to_vec(&spec).map_err(|error| FontJobError::InvalidResponse(error.to_string()))?,
         )?;
+        let stdout_path = workspace.path().join("stdout.log");
+        let stderr_path = workspace.path().join("stderr.log");
         let mut child = Command::new(&self.config.executable)
             .args(&self.config.executable_args)
             .args(["-lang=py", "-script"])
@@ -216,25 +127,16 @@ impl FontForgeWorker {
             .arg(&output)
             .arg(&response)
             .arg(&spec_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            // Files cannot fill a pipe and block the child while we wait.
+            .stdout(fs::File::create(&stdout_path)?)
+            .stderr(fs::File::create(&stderr_path)?)
             .spawn()
             .map_err(FontJobError::Start)?;
-        let started = Instant::now();
-        loop {
-            if let Some(status) = child.try_wait().map_err(FontJobError::Start)? {
-                if !status.success() {
-                    let stderr = child.stderr.take().map(read_stream).transpose()?.unwrap_or_default();
-                    return Err(FontJobError::Process(stderr));
-                }
-                break;
-            }
-            if started.elapsed() >= self.config.timeout {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(FontJobError::Timeout(self.config.timeout));
-            }
-            thread::sleep(Duration::from_millis(10));
+        let status = wait_for_child(&mut child, self.config.timeout)?;
+        if !status.success() {
+            let stderr = read_log(&stderr_path)?;
+            let stdout = read_log(&stdout_path)?;
+            return Err(FontJobError::Process(format!("{status}\nstderr:\n{stderr}\nstdout:\n{stdout}")));
         }
         let bytes = fs::read(&output).map_err(|_| FontJobError::InvalidOutput)?;
         if !self.config.output_format.has_signature(&bytes) {
@@ -281,10 +183,43 @@ fn is_supported_font(data: &[u8]) -> bool {
     matches!(data.get(..4), Some([0, 1, 0, 0]) | Some([b'O', b'T', b'T', b'O']))
 }
 
-fn read_stream(mut stream: impl io::Read) -> io::Result<String> {
-    let mut output = String::new();
-    stream.read_to_string(&mut output)?;
-    Ok(output)
+fn read_log(path: &Path) -> io::Result<String> {
+    const MAX_LOG_BYTES: u64 = 64 * 1024;
+    let mut file = fs::File::open(path)?;
+    let start = file.metadata()?.len().saturating_sub(MAX_LOG_BYTES);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_LOG_BYTES).read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn wait_for_child(child: &mut Child, timeout: Duration) -> Result<ExitStatus, FontJobError> {
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {}
+            Err(error) => {
+                terminate_child(child)?;
+                return Err(FontJobError::Wait(error));
+            }
+        }
+        if started.elapsed() >= timeout {
+            terminate_child(child)?;
+            return Err(FontJobError::Timeout(timeout));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn terminate_child(child: &mut Child) -> Result<(), FontJobError> {
+    if let Err(error) = child.kill()
+        && child.try_wait().map_err(FontJobError::Wait)?.is_none()
+    {
+        return Err(FontJobError::Wait(error));
+    }
+    child.wait().map_err(FontJobError::Wait)?;
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -316,7 +251,7 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use super::*;
-    use crate::model::{FontProcessingState, GlyphIdentity};
+    use crate::model::{FontProcessingState, FontSource, GlyphIdentity};
 
     fn source(identities: Vec<GlyphIdentity>) -> FontSource {
         FontSource {

@@ -1,4 +1,4 @@
-use crate::model::FontCatalog;
+use crate::fonts::FontMetrics;
 
 use super::{RunCharacter, TransformClass, natural_advance, observed_advance};
 
@@ -8,13 +8,13 @@ const INFERRED_SPACE_MAX_FACTOR: f32 = 1.75;
 pub(super) fn reconstruct_word_spaces<'a>(
     characters: &[RunCharacter<'a>],
     transform: TransformClass,
-    fonts: &FontCatalog,
+    font: Option<&FontMetrics<'_>>,
 ) -> Vec<RunCharacter<'a>> {
     let mut reconstructed = Vec::with_capacity(characters.len());
     for (index, pair) in characters.windows(2).enumerate() {
         reconstructed.push(pair[0]);
         let follows_shared_source_glyph = index > 0 && shares_source_glyph(characters[index - 1], pair[0]);
-        if !follows_shared_source_glyph && should_infer_space(pair[0], pair[1], transform, fonts) {
+        if !follows_shared_source_glyph && should_infer_space(pair[0], pair[1], transform, font) {
             reconstructed.push(RunCharacter { glyph: pair[0].glyph, character: ' ', semantic_space: true });
         }
     }
@@ -37,7 +37,7 @@ fn should_infer_space(
     previous: RunCharacter<'_>,
     next: RunCharacter<'_>,
     transform: TransformClass,
-    fonts: &FontCatalog,
+    font: Option<&FontMetrics<'_>>,
 ) -> bool {
     if previous.semantic_space
         || next.semantic_space
@@ -46,10 +46,10 @@ fn should_infer_space(
     {
         return false;
     }
-    let Some(character_advance) = natural_advance(previous.glyph, previous.character, transform, fonts) else {
+    let Some(character_advance) = natural_advance(previous.glyph, previous.character, transform, font) else {
         return false;
     };
-    let Some(space_advance) = natural_advance(previous.glyph, ' ', transform, fonts) else {
+    let Some(space_advance) = natural_advance(previous.glyph, ' ', transform, font) else {
         return false;
     };
     let gap = observed_advance(previous.glyph, next.glyph, transform) - character_advance;

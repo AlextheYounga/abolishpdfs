@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
+use ttf_parser::Face;
 
 use super::*;
 use crate::model::{
@@ -60,14 +61,14 @@ fn irregular_word_error_keeps_exact_offsets() {
 #[test]
 fn source_font_shaping_replaces_matching_pair_offsets() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fonts/LiberationSans-Regular.ttf");
-    let Ok(data) = fs::read(path) else { return };
-    let Ok(face) = Face::parse(&data, 0) else { return };
+    let data = fs::read(path).expect("Liberation Sans fixture is required");
+    let face = Face::parse(&data, 0).expect("Liberation Sans fixture must parse");
     let characters = ['T', 'o'];
     let mut advances = BTreeMap::new();
     let mut identities = Vec::new();
     for character in characters {
-        let Some(glyph) = face.glyph_index(character) else { return };
-        let Some(advance) = face.glyph_hor_advance(glyph) else { return };
+        let glyph = face.glyph_index(character).expect("fixture must contain test characters");
+        let advance = face.glyph_hor_advance(glyph).expect("fixture must contain advance metrics");
         advances.insert(character, advance);
         identities.push(GlyphIdentity { unicode: character, source_code: None, glyph_id: Some(glyph.0) });
     }
@@ -92,11 +93,43 @@ fn source_font_shaping_replaces_matching_pair_offsets() {
     });
     let mut run = run("To");
     run.style.font = Some(0);
-    let Some(natural) = natural_advances(&run, &fonts, &characters, &(0..2)) else { return };
-    let Some(shaped) = shaped_positions(&run, &fonts, &characters, &(0..2)) else { return };
+    let natural = natural_advances(&run, &fonts, &characters, &(0..2)).expect("test characters must have metrics");
+    let shaped = shaped_positions(&run, &fonts, &characters, &(0..2)).expect("fixture word must be shapeable");
     let pair_adjustment = shaped[1] - natural[0];
     assert!(pair_adjustment.abs() > 0.01);
     run.local_offsets.push(RunOffset { character_index: 1, amount: pair_adjustment });
 
     assert_eq!(choose_layout(&run, &fonts, &characters, &(0..2)), WordLayout::Shaped);
+}
+
+#[test]
+fn word_metrics_fall_back_to_source_for_missing_processed_characters_and_scale_transforms() {
+    let data = include_bytes!("../../tests/fixtures/fonts/LiberationSans-Regular.ttf").to_vec();
+    let face = Face::parse(&data, 0).unwrap();
+    let expected_b = f32::from(face.glyph_hor_advance(face.glyph_index('B').unwrap()).unwrap())
+        / f32::from(face.units_per_em())
+        * 20.0;
+    let mut fonts = FontCatalog::new();
+    fonts.insert(FontSource {
+        name: "Fixture".to_owned(),
+        embedded: Some(true),
+        data: Some(data),
+        used_unicode: vec!['A', 'B'],
+        used_identities: Vec::new(),
+        mapping_proven: true,
+        processing: FontProcessingState::Ready(ProcessedFont {
+            asset_name: "fixture.woff2".to_owned(),
+            family_name: "fixture".to_owned(),
+            data: Vec::new(),
+            glyph_count: 2,
+            advance_widths: vec![2000],
+            units_per_em: 1000,
+            advances_by_unicode: BTreeMap::from([('A', 2000)]),
+        }),
+    });
+    let mut run = run("AB");
+    run.style.font = Some(0);
+    run.placement = RunPlacement::Transformed { left: 0.0, bottom: 0.0, matrix: [0.0, 2.0, -1.0, 0.0] };
+    let advances = natural_advances(&run, &fonts, &['A', 'B'], &(0..2)).unwrap();
+    assert_eq!(advances, vec![40.0, expected_b]);
 }

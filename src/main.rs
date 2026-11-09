@@ -2,7 +2,7 @@ use std::{env, process::ExitCode};
 
 use abolishpdfs::{
     cli::Cli,
-    fonts::{FontForgeWorker, WorkerConfig},
+    fonts::{self, FontForgeWorker, WorkerConfig},
     output::HtmlWriter,
     pdfium::{CapabilityProbe, DocumentExtractor, PdfiumLibrary},
     text::prepare,
@@ -35,7 +35,10 @@ fn main() -> ExitCode {
             } else {
                 match DocumentExtractor::extract(&cli.input, &library) {
                     Ok(mut model) => {
-                        model.prepare_fonts(&FontForgeWorker::new(WorkerConfig::new(cli.fontforge_path)));
+                        fonts::prepare_document(
+                            &mut model,
+                            &FontForgeWorker::new(WorkerConfig::new(cli.fontforge_path)),
+                        );
                         prepare(&mut model);
                         if cli.diagnostic {
                             match serde_json::to_string_pretty(&model) {

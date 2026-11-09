@@ -1,4 +1,11 @@
-use std::{env, error::Error, fs, process, thread, time::Duration};
+use std::{
+    env,
+    error::Error,
+    fs,
+    io::{self, Write},
+    process, thread,
+    time::Duration,
+};
 
 use abolishpdfs::fonts::FontJobSpec;
 
@@ -16,8 +23,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let spec: FontJobSpec = serde_json::from_str(&fs::read_to_string(request_path)?)?;
     let _ = input_path;
 
+    if matches!(mode.as_str(), "noisy-success" | "noisy-failure") {
+        let chunk = vec![b'x'; 8192];
+        for _ in 0..64 {
+            io::stdout().write_all(&chunk)?;
+            io::stderr().write_all(&chunk)?;
+        }
+        io::stderr().write_all(b"\nworker diagnostic: \xff\n")?;
+    }
+
     match mode.as_str() {
-        "success" => {
+        "success" | "noisy-success" => {
             fs::write(output_path, b"wOF2fake-font")?;
             let widths = spec
                 .records
@@ -61,8 +77,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ),
             )?;
         }
-        "process-failure" => process::exit(7),
+        "process-failure" | "noisy-failure" => process::exit(7),
         "timeout" => thread::sleep(Duration::from_secs(1)),
+        "timeout-with-pid" => {
+            fs::write(arguments.get(2).ok_or("missing PID file")?, process::id().to_string())?;
+            thread::sleep(Duration::from_secs(5));
+        }
         _ => return Err(format!("unknown fake worker mode: {mode}").into()),
     }
 

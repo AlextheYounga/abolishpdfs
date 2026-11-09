@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+use std::ffi::OsString;
 use std::{collections::BTreeMap, fs, path::Path, time::Duration};
 
 use abolishpdfs::{
@@ -39,7 +41,17 @@ fn spec_deduplicates_and_merges_identity_fields_in_first_appearance_order() {
         GlyphIdentity { unicode: 'B', source_code: Some(0x42), glyph_id: None },
     ];
     let spec = FontJobSpec::from_source(&source, "pdf-font-3".to_owned());
-    assert_eq!(serde_json::to_string(&spec).ok(), Some(r#"{"family_name":"pdf-font-3","records":[{"unicode":"B","source_glyph_name":"A","source_code":66,"source_glyph_id":36},{"unicode":"A","source_glyph_name":null,"source_code":65,"source_glyph_id":null}]}"#.to_owned()));
+    let records = serde_json::to_value(&spec.records).unwrap();
+    assert_eq!(
+        records[0],
+        serde_json::json!({"unicode":"B","source_glyph_name":"A","source_code":66,"source_glyph_id":36})
+    );
+    assert_eq!(
+        records[1],
+        serde_json::json!({"unicode":"A","source_glyph_name":null,"source_code":65,"source_glyph_id":null})
+    );
+    assert_eq!(records[2]["unicode"], " ");
+    assert_eq!(spec.records.len(), 3);
 }
 
 #[test]
@@ -49,7 +61,10 @@ fn identity_spec_round_trips_through_fake_worker() {
     source.used_identities = vec![GlyphIdentity { unicode: 'B', source_code: Some(0x41), glyph_id: Some(36) }];
     let result = worker("success").process(&FontJobRequest { id: 3, source: &source });
     assert!(result.is_ok());
-    assert_eq!(result.ok().map(|result| result.font.advances_by_unicode), Some(BTreeMap::from([('B', 600)])));
+    assert_eq!(
+        result.ok().map(|result| result.font.advances_by_unicode),
+        Some(BTreeMap::from([('B', 600), (' ', 610)]))
+    );
 }
 
 #[test]
@@ -79,6 +94,34 @@ fn worker_reports_subprocess_failure() {
         worker("process-failure").process(&FontJobRequest { id: 0, source: &source }),
         Err(FontJobError::Process(_))
     ));
+}
+
+#[test]
+fn noisy_worker_can_complete_without_blocking_on_its_logs() {
+    assert!(worker("noisy-success").process(&FontJobRequest { id: 0, source: &source() }).is_ok());
+}
+
+#[test]
+fn noisy_worker_reports_exit_status_and_non_utf8_diagnostics_instead_of_timeout() {
+    let error = worker("noisy-failure").process(&FontJobRequest { id: 0, source: &source() }).unwrap_err();
+    let FontJobError::Process(message) = error else { panic!("expected process failure, got {error}") };
+    assert!(message.contains("7"));
+    assert!(message.contains("worker diagnostic:"));
+    assert!(message.len() < 140_000, "diagnostics should retain bounded log tails");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn timed_out_worker_is_terminated_and_reaped_before_returning() {
+    let directory = tempfile::tempdir().unwrap();
+    let pid_file = directory.path().join("worker.pid");
+    let mut config = WorkerConfig::new(HELPER)
+        .with_executable_args([OsString::from("timeout-with-pid"), pid_file.as_os_str().to_owned()]);
+    config.timeout = Duration::from_millis(250);
+    let result = FontForgeWorker::new(config).process(&FontJobRequest { id: 0, source: &source() });
+    assert!(matches!(result, Err(FontJobError::Timeout(_))));
+    let pid = fs::read_to_string(pid_file).expect("worker must have started before the timeout");
+    assert!(!Path::new("/proc").join(pid).exists(), "worker must not remain alive or as an unreaped zombie");
 }
 
 #[test]
