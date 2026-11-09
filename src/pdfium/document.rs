@@ -6,8 +6,7 @@ use crate::fonts::{identity_mapping_is_proven, mapping_is_proven};
 use crate::model::{
     AffineTransform, ClipState, Color, DiagnosticScope, DocumentDiagnostic, DocumentModel, FontCatalog, FontId,
     FontProcessingState, FontSource, Glyph, GlyphIdentity, GraphicsKind, GraphicsObject, Link, PageModel, Point,
-    ReconstructionDecision, Rect, Size, TextFailureReason, TextIntegrityFailure, TextObject, TextRenderMode,
-    VisibilityDecision,
+    ReconstructionDecision, Rect, Size, TextFailureReason, TextObject, TextRenderMode, VisibilityDecision,
 };
 use crate::text::{projection, visibility};
 
@@ -79,13 +78,16 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         font_ids.insert(font.name(), id);
     }
 
-    let page_text = page.text().ok();
-    if page_text.is_none() {
-        model.diagnostics.push(DocumentDiagnostic {
-            scope: DiagnosticScope::Page(index + 1),
-            message: "could not load page text; text objects are retained as background".to_owned(),
-        });
-    }
+    let page_text = match page.text() {
+        Ok(text) => Some(text),
+        Err(error) => {
+            model.diagnostics.push(DocumentDiagnostic {
+                scope: DiagnosticScope::Page(index + 1),
+                message: format!("could not load page text: {error}"),
+            });
+            None
+        }
+    };
 
     let mut text_objects = Vec::new();
     let mut graphics = Vec::new();
@@ -105,11 +107,7 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
         }
     }
     prove_font_mappings(model);
-    for text_object in &mut text_objects {
-        text_object.reconstruction =
-            reconstruction_decision(&text_object.glyphs, text_object.font, text_object.render_mode, model);
-    }
-    visibility::analyze(&mut text_objects, &graphics);
+    analyze_text_objects(&mut text_objects, &graphics, model);
     for text_object in &text_objects {
         if matches!(text_object.visibility, VisibilityDecision::AmbiguousVisibility)
             && matches!(
@@ -126,16 +124,10 @@ fn extract_page(page: &PdfPage<'_>, index: usize, model: &mut DocumentModel) -> 
     }
     let mut failed_text_paint_orders = Vec::new();
     for text_object in &text_objects {
-        let ReconstructionDecision::TextFailure(reason) = text_object.reconstruction.clone() else {
+        let ReconstructionDecision::TextFailure(_) = &text_object.reconstruction else {
             continue;
         };
         failed_text_paint_orders.push(text_object.paint_order);
-        model.text_failures.push(TextIntegrityFailure {
-            page: index + 1,
-            paint_order: text_object.paint_order,
-            reason,
-            semantic_text_available: text_object.glyphs.iter().all(|glyph| glyph.unicode.is_some()),
-        });
     }
 
     let background = if needs_raster_background(&failed_text_paint_orders, &graphics) {
@@ -175,6 +167,17 @@ fn needs_raster_background(failed_text_paint_orders: &[usize], graphics: &[Graph
     !failed_text_paint_orders.is_empty() || !graphics.is_empty()
 }
 
+fn analyze_text_objects(text_objects: &mut [TextObject], graphics: &[GraphicsObject], model: &DocumentModel) {
+    for text_object in text_objects.iter_mut() {
+        // Extraction failure is not evidence of an intentionally empty object.
+        if matches!(text_object.reconstruction, ReconstructionDecision::NativeText) {
+            text_object.reconstruction =
+                reconstruction_decision(&text_object.glyphs, text_object.font, text_object.render_mode, model);
+        }
+    }
+    visibility::analyze(text_objects, graphics);
+}
+
 struct ExtractionContext<'a, 'b> {
     model: &'a mut DocumentModel,
     font_ids: &'b HashMap<String, FontId>,
@@ -192,21 +195,27 @@ fn extract_object(
     let paint_order = *context.next_paint_order;
     *context.next_paint_order += 1;
     if let PdfPageObject::Text(text) = object {
-        let object_glyphs = match page_text {
+        let extracted_glyphs = match page_text {
             Some(text_page) => match text_page.chars_for_object(text) {
                 Ok(characters) => {
-                    characters.iter().map(|character| extract_glyph(&character, context)).collect::<Vec<_>>()
+                    Some(characters.iter().map(|character| extract_glyph(&character, context)).collect::<Vec<_>>())
                 }
                 Err(error) => {
                     context.model.diagnostics.push(DocumentDiagnostic {
                         scope: DiagnosticScope::Object { page: context.page_number, paint_order },
                         message: format!("could not extract characters: {error}"),
                     });
-                    Vec::new()
+                    None
                 }
             },
-            None => Vec::new(),
+            None => None,
         };
+        let reconstruction = if extracted_glyphs.is_some() {
+            ReconstructionDecision::NativeText
+        } else {
+            ReconstructionDecision::TextFailure(TextFailureReason::ExtractionError)
+        };
+        let object_glyphs = extracted_glyphs.unwrap_or_default();
         let font = object_glyphs.first().and_then(|glyph| glyph.font).unwrap_or_else(|| first_font_id(context.model));
         let render_mode = text_render_mode(text.render_mode());
         let object_transform = text.matrix().ok().map(affine_transform);
@@ -223,7 +232,6 @@ fn extract_object(
         }
         let object_clip = clip_state_with_bounds(object, glyph_bounds(&object_glyphs));
         let clipping = inherited_clipping || matches!(object_clip, ClipState::Clipped);
-        let reconstruction = reconstruction_decision(&object_glyphs, font, render_mode, context.model);
         context.text_objects.push(TextObject {
             source: paint_order,
             paint_order,

@@ -73,6 +73,9 @@ impl HtmlWriter {
         if !failures.is_empty() {
             return Err(OutputError::TextIntegrity(TextIntegrityError { failures }));
         }
+        if let Some(page) = model.pages.iter().find(|page| !page.graphics.is_empty() && page.background.is_none()) {
+            return Err(OutputError::MissingBackground { page: page.number });
+        }
         let rendered = Self::render(model);
         fs::create_dir_all(output.join("assets")).map_err(OutputError::CreateDirectory)?;
         fs::write(output.join("index.html"), rendered.index_html).map_err(OutputError::WriteFile)?;
@@ -302,6 +305,8 @@ pub(super) fn escape_html(value: &str) -> String {
 pub enum OutputError {
     #[error("{0}")]
     TextIntegrity(TextIntegrityError),
+    #[error("page {page} has graphics but no rendered background")]
+    MissingBackground { page: usize },
     #[error("could not create output directory: {0}")]
     CreateDirectory(io::Error),
     #[error("could not write output file: {0}")]
@@ -330,3 +335,7 @@ impl fmt::Display for TextIntegrityError {
 #[cfg(test)]
 #[path = "document_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "integrity_tests.rs"]
+mod integrity_tests;

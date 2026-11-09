@@ -47,6 +47,10 @@ That last point matters. Quietly swapping a damaged line of text for the wrong
 font may produce a file, but it does not produce a faithful document. This
 project would rather tell the truth.
 
+Extraction failures and missing required graphics backgrounds also prevent
+successful output. These integrity checks run before output files are written,
+so an integrity failure does not overwrite an earlier conversion.
+
 ## What it produces
 
 Each conversion writes a small, portable artifact set:

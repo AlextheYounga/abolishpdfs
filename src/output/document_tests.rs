@@ -8,7 +8,7 @@ use crate::model::{
 };
 use crate::text::{SPACING_MIN_PX, prepare};
 
-fn model_with_text(text: &str) -> DocumentModel {
+pub(super) fn model_with_text(text: &str) -> DocumentModel {
     let mut model = DocumentModel {
         pages: vec![PageModel {
             number: 1,
